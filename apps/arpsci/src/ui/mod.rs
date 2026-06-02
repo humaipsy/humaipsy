@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 use tokio::runtime::Handle;
 
 mod nodes_panel;
-mod python_panel;
 mod settings_panel;
 mod overview_chat;
 
@@ -32,40 +31,10 @@ impl Default for OllamaUiState {
 	}
 }
 
-pub(crate) struct PythonPanelUiState {
-	pub(crate) label_input: String,
-	pub(crate) interpreter_input: String,
-	pub(crate) pkg_input: String,
-	pub(crate) active_runtime: Option<crate::python::PythonRuntime>,
-	pub(crate) op_running: Arc<AtomicBool>,
-	pub(crate) status: String,
-	pub(crate) bg_new_runtime:
-		Arc<Mutex<Option<Result<crate::python::PythonRuntime, String>>>>,
-	pub(crate) bg_msg: Arc<Mutex<Option<String>>>,
-	pub(crate) bg_destroyed: Arc<AtomicBool>,
-}
-
-impl Default for PythonPanelUiState {
-	fn default() -> Self {
-		Self {
-			label_input: String::new(),
-			interpreter_input: "python3".to_string(),
-			pkg_input: String::new(),
-			active_runtime: None,
-			op_running: Arc::new(AtomicBool::new(false)),
-			status: String::new(),
-			bg_new_runtime: Arc::new(Mutex::new(None)),
-			bg_msg: Arc::new(Mutex::new(None)),
-			bg_destroyed: Arc::new(AtomicBool::new(false)),
-		}
-	}
-}
-
 pub(crate) struct ArpsciUiState {
 	pub(crate) ollama: OllamaUiState,
 	pub(crate) agents_workspace_path: String,
 	pub(crate) manifest_status_message: String,
-	pub(crate) python: PythonPanelUiState,
 }
 
 impl Default for ArpsciUiState {
@@ -74,7 +43,6 @@ impl Default for ArpsciUiState {
 			ollama: OllamaUiState::default(),
 			agents_workspace_path: String::new(),
 			manifest_status_message: String::new(),
-			python: PythonPanelUiState::default(),
 		}
 	}
 }
