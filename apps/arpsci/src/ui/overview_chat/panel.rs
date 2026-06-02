@@ -15,6 +15,9 @@ use super::store::Store;
 static CHAT: OnceLock<Mutex<ChatExample>> = OnceLock::new();
 static ACTIVE_ROOM_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static ROOM_ORDER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+pub(crate) static EXPERIMENT_NAME: OnceLock<Mutex<String>> = OnceLock::new();
+pub(crate) static EXPERIMENT_CSV_NAME: OnceLock<Mutex<String>> = OnceLock::new();
+pub(crate) static FINAL_PARTICIPANT_QUESTION: OnceLock<Mutex<String>> = OnceLock::new();
 
 pub(crate) fn selected_room_id() -> Option<String> {
     CHAT.get()
@@ -487,7 +490,14 @@ fn render_right_bar(
             ui.set_height(row_height);
             ui.add_space(-1.0);
             ui.vertical(|ui| {
-                ui.label(egui::RichText::new("Right Bar").strong().size(16.0));
+                let experiment_name =
+                    EXPERIMENT_NAME.get_or_init(|| Mutex::new("Exp001".to_string()));
+                let experiment_csv_name =
+                    EXPERIMENT_CSV_NAME.get_or_init(|| Mutex::new("Exp001.csv".to_string()));
+                let final_participant_question = FINAL_PARTICIPANT_QUESTION
+                    .get_or_init(|| Mutex::new(String::new()));
+
+                ui.label(egui::RichText::new("Experimental Control Panel").strong().size(16.0));
                 ui.separator();
                 ui.label(format!(
                     "Selected room: {}",
@@ -501,7 +511,255 @@ fn render_right_bar(
                 ui.add_space(4.0);
                 ui.separator();
                 ui.add_space(4.0);
-                ui.label("This is a placeholder.");
+
+                let columns_height = (ui.available_height() - 20.0).max(0.0);
+
+                let total_width = ui.available_width();
+                let left_width = (total_width * 0.3).max(0.0);
+                let right_width = (total_width * 0.61).max(0.0);
+
+                ui.allocate_ui_with_layout(
+                    egui::vec2(total_width, columns_height),
+                    egui::Layout::left_to_right(egui::Align::Min),
+                    |ui| {
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(left_width, columns_height),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.set_min_width(left_width);
+                                ui.set_max_width(left_width);
+                                egui::Frame::default()
+                                    .stroke(egui::Stroke::new(
+                                        1.0,
+                                        ui.visuals().widgets.noninteractive.bg_stroke.color,
+                                    ))
+                                    .inner_margin(egui::Margin::same(6))
+                                    .show(ui, |ui| {
+                                        ui.set_min_width(left_width);
+                                        ui.set_max_width(left_width);
+                                        ui.set_min_height(columns_height);
+                                        ui.set_height(columns_height);
+
+                                        let csv_label = experiment_csv_name
+                                            .lock()
+                                            .map(|v| v.clone())
+                                            .unwrap_or_else(|_| "Exp001.csv".to_string());
+                                        ui.horizontal(|ui| {
+                                            ui.label("CSV:");
+                                            ui.label(csv_label);
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Exp. Design");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Groups: 1");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Conditions: 2");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Blocks: 2");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Trials: 2");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Trial (s): 3000");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Timer: Yes");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Question: Yes");
+                                        });
+
+                                    });
+                            },
+                        );
+
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(right_width, columns_height),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.set_min_width(right_width);
+                                ui.set_max_width(right_width);
+                                egui::Frame::default()
+                                    .stroke(egui::Stroke::new(
+                                        1.0,
+                                        ui.visuals().widgets.noninteractive.bg_stroke.color,
+                                    ))
+                                    .inner_margin(egui::Margin::same(6))
+                                    .show(ui, |ui| {
+                                        ui.set_min_width(right_width);
+                                        ui.set_max_width(right_width);
+                                        ui.set_min_height(columns_height);
+                                        ui.set_height(columns_height);
+
+                                        
+
+                                        ui.horizontal(|ui| {
+                                            ui.label("Name:");
+                                            if let Ok(mut name) = experiment_name.lock() {
+                                                let response = ui.add(
+                                                    egui::TextEdit::singleline(&mut *name)
+                                                        .desired_width(140.0),
+                                                );
+                                                if response.changed() {
+                                                    let csv_name = format!("{}.csv", name.trim());
+                                                    if let Ok(mut csv) = experiment_csv_name.lock() {
+                                                        *csv = csv_name;
+                                                    }
+                                                }
+                                            }
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Between Subjects (type group name)");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            let _ = ui.button("Groups");
+                                            let _ = ui.button("Group 1");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Within Subjects (Condition)");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            let _ = ui.button("Conditions");
+                                            let _ = ui.button("Coop");
+                                            let _ = ui.button("Argum");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Number of Condition Blocks");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            let _ = ui.button("No Trials");
+                                            let _ = ui.button("2");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Number of Trials per Condition");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            let _ = ui.button("No Trials");
+                                            let _ = ui.button("2");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Max Duration of Trial");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            let _ = ui.button("Seconds");
+                                            let _ = ui.button("180");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Final Question to Participant​");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            if let Ok(mut question) = final_participant_question.lock() {
+                                                ui.add(
+                                                    egui::TextEdit::singleline(&mut *question)
+                                                        .hint_text("Type final question")
+                                                        .desired_width((right_width - 24.0).max(120.0)),
+                                                );
+                                            }
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Timer​");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            let _ = ui.button("ON");
+                                        });
+
+                                        ui.add_space(50.0);
+                                        ui.horizontal(|ui| {
+                                            let _ = ui.button("Reset");
+                                            let _ = ui.button("Submit");
+                                            let _ = ui.button("Download");
+                                            let _ = ui.button("Upload");
+                                        });
+
+                                        
+                                    });
+                            },
+                        );
+                    },
+                );
                 
             });
         });

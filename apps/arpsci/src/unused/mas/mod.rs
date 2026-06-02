@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports)]
+
 use crate::app_state::AppState;
 use crate::metrics::MetricsConfig;
 use crate::run::event_ledger::EventLedger;

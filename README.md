@@ -4,6 +4,10 @@ Under heavy development.
 
 Repository for HumxAI (Humai) v0.1.
 
+- Cross-platform Application for Human-AI Interaction
+- Design Experimental Testing
+- Integrated with Ollama (locally and offline)
+
 ## Dependencies
 
 - Git (>= 2.30)
@@ -13,6 +17,9 @@ Repository for HumxAI (Humai) v0.1.
 - Cargo (bundled with Rust toolchain)
 - Python (>= 3.12)
 - uv (latest stable)
+
+
+## SOURCE
 
 
 
@@ -97,8 +104,5 @@ Dashboard static files:
 - `platform/src/ui/index.html`
 - `platform/src/ui/styles.css`
 - `platform/src/ui/app.js`
-
-
-## SOURCE
 
 

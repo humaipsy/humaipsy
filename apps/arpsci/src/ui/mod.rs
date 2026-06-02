@@ -5,7 +5,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Handle;
 
-mod nodes_panel;
+mod panel_render;
 mod settings_panel;
 mod overview_chat;
 
@@ -33,16 +33,12 @@ impl Default for OllamaUiState {
 
 pub(crate) struct ArpsciUiState {
 	pub(crate) ollama: OllamaUiState,
-	pub(crate) agents_workspace_path: String,
-	pub(crate) manifest_status_message: String,
 }
 
 impl Default for ArpsciUiState {
 	fn default() -> Self {
 		Self {
 			ollama: OllamaUiState::default(),
-			agents_workspace_path: String::new(),
-			manifest_status_message: String::new(),
 		}
 	}
 }
@@ -175,10 +171,7 @@ impl ArpsciApp {
 		Self {
 			vault: MasterVault::new(),
 			ams_agents: Arpsci::new(rt_handle),
-			ui_state: ArpsciUiState {
-				agents_workspace_path: "runs/agents-workspace.json".to_string(),
-				..Default::default()
-			},
+			ui_state: ArpsciUiState::default(),
 			last_applied_theme: None,
 			phosphor_fonts_installed: false,
 		}

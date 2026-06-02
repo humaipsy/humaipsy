@@ -13,7 +13,4 @@ mod run_graph;
 #[path = "nodes_panel_state.rs"]
 mod state;
 
-pub(crate) use manifest_ops::sync_evaluator_researcher_activity;
-pub(crate) use model::{AgentNodeKind, EvaluatorAgentsPick, NodePayload};
-pub(crate) use presets::TOPIC_PRESETS;
-pub(crate) use state::{AgentRecord, NodesPanelState, PanelTab, WORKSPACE_MODULE_ENABLED};
+pub(crate) use state::{NodesPanelState, PanelTab};
