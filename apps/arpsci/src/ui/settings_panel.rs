@@ -3,45 +3,7 @@ use crate::ui::ArpsciUiState;
 use eframe::egui;
 use std::sync::atomic::Ordering;
 
-/// Preset values for how many recent agent messages are included in the next dialogue prompt.
-const CHAT_HISTORY_PRESETS: &[usize] = &[1, 2, 3, 5, 8, 10, 15, 20, 30, 50];
-
 impl Arpsci {
-    /// Chat / dialogue history size (Settings tab, above Reproducibility).
-    fn render_chat_settings_widgets(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("Chat Settings").strong().size(16.0));
-        ui.separator();
-
-        let mut choices: Vec<usize> = CHAT_HISTORY_PRESETS.to_vec();
-        if !choices.contains(&self.conversation_history_size) {
-            choices.push(self.conversation_history_size);
-            choices.sort_unstable();
-        }
-        ui.horizontal(|ui| {
-            ui.label("History Size:");
-            egui::ComboBox::from_id_salt("chat_history_size")
-                .selected_text(format!("{}", self.conversation_history_size))
-                .show_ui(ui, |ui| {
-                    for &n in &choices {
-                        let label = if n == 1 {
-                            "1 message".to_string()
-                        } else {
-                            format!("{n} messages")
-                        };
-                        ui.selectable_value(&mut self.conversation_history_size, n, label);
-                    }
-                });
-        });
-        ui.add_space(2.0);
-        ui.label(
-            egui::RichText::new(
-                "Number of recent agent replies kept in context for the next turn.",
-            )
-            .small()
-            .weak(),
-        );
-    }
-
     pub(super) fn render_ollama_settings_widgets(
         &mut self,
         ui: &mut egui::Ui,
@@ -213,8 +175,6 @@ impl Arpsci {
 
     pub(super) fn render_reproducibility_settings_widgets(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
-            self.render_chat_settings_widgets(ui);
-            ui.add_space(6.0);
             ui.label(egui::RichText::new("Air-gap Policy").strong().size(16.0));
             ui.separator();
 

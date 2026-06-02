@@ -4,6 +4,8 @@ use eframe::egui;
 
 use super::model::NodeData;
 
+pub(crate) const WORKSPACE_MODULE_ENABLED: bool = false;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PanelTab {
     Overview,

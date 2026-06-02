@@ -2,6 +2,7 @@
 //!
 //! Configure with `ARPSCI_MASTER_HASH` (PHC string) or a file at `runs/.master_hash` (first line).
 //! Optional Argon2id tuning via env: `ARPSCI_ARGON2_M_KIB`, `ARPSCI_ARGON2_T`, `ARPSCI_ARGON2_P`.
+//! Set `ENABLE_PASSWORD_LOCK` to `false` for instant unlocked startup in development.
 //! Set `ARPSCI_SKIP_VAULT=1` to disable the gate (development only).
 
 use argon2::password_hash::rand_core::{OsRng, RngCore};
@@ -14,6 +15,8 @@ use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
 const DEFAULT_HASH_FILE: &str = "runs/.master_hash";
+/// Development toggle: keep `false` to boot unlocked; set `true` to enforce the password gate.
+pub const ENABLE_PASSWORD_LOCK: bool = false;
 const ARGON2_M_KIB_DEFAULT: u32 = 64 * 1024;
 const ARGON2_T_DEFAULT: u32 = 3;
 const ARGON2_P_MAX: u32 = 4;
@@ -210,7 +213,8 @@ pub struct MasterVault {
 
 impl MasterVault {
     pub fn new() -> Self {
-        let skip_vault = std::env::var("ARPSCI_SKIP_VAULT").unwrap_or_default() == "1";
+        let skip_vault = !ENABLE_PASSWORD_LOCK
+            || std::env::var("ARPSCI_SKIP_VAULT").unwrap_or_default() == "1";
         let stored_hash = std::env::var("ARPSCI_MASTER_HASH")
             .ok()
             .filter(|s| !s.trim().is_empty())

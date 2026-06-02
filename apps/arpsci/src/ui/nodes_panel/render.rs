@@ -10,7 +10,7 @@ use crate::agents::Arpsci;
 use crate::agents::GlobalChatMode;
 use crate::agents::nodes_panel::{
     sync_evaluator_researcher_activity, AgentNodeKind, AgentRecord, NodePayload,
-    PanelTab,
+    PanelTab, WORKSPACE_MODULE_ENABLED,
 };
 use crate::ui::ArpsciUiState;
 
@@ -25,6 +25,10 @@ impl BasicNodeViewer {
 
 impl Arpsci {
     pub(crate) fn render_nodes_panel(&mut self, ui: &mut egui::Ui, ui_state: &mut ArpsciUiState) {
+        if !WORKSPACE_MODULE_ENABLED && self.nodes_panel.active_tab == PanelTab::Agents {
+            self.nodes_panel.active_tab = PanelTab::Overview;
+        }
+
         let panel_border_color = ui.visuals().widgets.noninteractive.bg_stroke.color;
         let nodes_panel = egui::Frame::default()
             .fill(ui.visuals().panel_fill)
@@ -50,12 +54,13 @@ impl Arpsci {
                         {
                             self.nodes_panel.active_tab = PanelTab::Overview;
                         }
-                        if ui
-                            .selectable_label(
-                                self.nodes_panel.active_tab == PanelTab::Agents,
-                                "Workspace",
-                            )
-                            .clicked()
+                        if WORKSPACE_MODULE_ENABLED
+                            && ui
+                                .selectable_label(
+                                    self.nodes_panel.active_tab == PanelTab::Agents,
+                                    "Workspace",
+                                )
+                                .clicked()
                         {
                             self.nodes_panel.active_tab = PanelTab::Agents;
                         }
@@ -238,17 +243,17 @@ impl Arpsci {
                         }
 
                         ui.horizontal(|ui| {
-                            ui.label("Chat Mode:");
+                            ui.label("Chat Input:");
                             ui.add_enabled_ui(!graph_running, |ui| {
                                 ui.selectable_value(
                                     &mut self.chat_mode,
                                     GlobalChatMode::HumanToAgent,
-                                    "Human -> Agent",
+                                    "Enabled",
                                 );
                                 ui.selectable_value(
                                     &mut self.chat_mode,
                                     GlobalChatMode::AgentToAgent,
-                                    "Agent -> Agent",
+                                    "Disabled",
                                 );
                             });
                             if graph_running {
@@ -339,205 +344,253 @@ impl Arpsci {
                                 |ui| {
                                 ui.set_min_height(row_height);
                                 ui.set_height(row_height);
-                                egui::Frame::default()
-                                    .stroke(egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color))
-                                    .inner_margin(egui::Margin::same(0))
-                                    .show(ui, |ui| {
-                                        ui.set_min_height(row_height - 60.0); // Account for input row
-                                        ui.set_height(row_height - 60.0); // Account for input row
-                                        ui.set_width((ui.available_width() - 40.0).max(0.0)); // Account for additions on left
-                                        egui::Frame::new()
-                                            .inner_margin(egui::Margin::same(4))
-                                            .show(ui, |ui| {
-                                                let input_row_height = 28.0;
-                                                let bottom_gap = 6.0;
-                                                let messages_height =
-                                                    (ui.available_height() - input_row_height - bottom_gap)
-                                                        .max(0.0);
-                                                ui.allocate_ui_with_layout(
-                                                    egui::vec2(ui.available_width(), messages_height),
-                                                    egui::Layout::top_down(egui::Align::Min),
-                                                    |ui| {
-                                                        ui.set_min_height(messages_height);
-                                                        egui::ScrollArea::vertical()
-                                                            .stick_to_bottom(true)
-                                                            .show(ui, |ui| {
-                                                                ui.vertical(|ui| {
-                                                                    ui.set_width(ui.available_width());
-                                                                    let len = chat.messages.len();
-                                                                    let time_col_width = 82.0;
-                                                                    for (i, msg) in chat.messages.iter().enumerate() {
-                                                                        ui.allocate_ui_with_layout(
-                                                                            egui::vec2(ui.available_width(), 0.0),
-                                                                            egui::Layout::left_to_right(egui::Align::Min),
-                                                                            |ui| {
-                                                                                // Fixed left column for timestamps.
-                                                                                ui.allocate_ui_with_layout(
-                                                                                    egui::vec2(time_col_width, 0.0),
-                                                                                    egui::Layout::top_down(egui::Align::Min),
-                                                                                    |ui| {
-                                                                                        egui::Frame::new()
-                                                                                            .fill(ui.visuals().widgets.inactive.bg_fill)
-                                                                                            .stroke(egui::Stroke::new(0.5, ui.visuals().widgets.noninteractive.bg_stroke.color))
-                                                                                            .corner_radius(egui::CornerRadius::same(2))
-                                                                                            .inner_margin(egui::Margin::symmetric(6, 2))
-                                                                                            .show(ui, |ui| {
-                                                                                                let ts = chat
-                                                                                                    .message_timestamps
-                                                                                                    .get(i)
-                                                                                                    .cloned()
-                                                                                                    .unwrap_or_else(|| "--:--:--".to_string());
-                                                                                                ui.label(ts);
-                                                                                            });
-                                                                                    },
-                                                                                );
+                                let total_width = ui.available_width();
+                                let chat_column_width = (total_width * 0.56).clamp(240.0, total_width);
+                                let side_column_width = (total_width * 0.45).clamp(240.0, total_width);
 
-                                                                                let msg_width = (ui.available_width() - ui.spacing().item_spacing.x)
-                                                                                    .max(0.0);
-                                                                                ui.allocate_ui_with_layout(
-                                                                                    egui::vec2(msg_width, 0.0),
-                                                                                    egui::Layout::top_down(egui::Align::Min),
-                                                                                    |ui| {
-                                                                                        // Message bubble — wraps to available width.
-                                                                                        egui::Frame::new()
-                                                                                            .fill(ui.visuals().extreme_bg_color)
-                                                                                            .stroke(egui::Stroke::new(0.5, ui.visuals().widgets.noninteractive.bg_stroke.color))
-                                                                                            .corner_radius(egui::CornerRadius::same(2))
-                                                                                            .inner_margin(egui::Margin::symmetric(8, 4))
-                                                                                            .show(ui, |ui| {
-                                                                                                ui.set_max_width(ui.available_width());
-                                                                                                ui.add(egui::Label::new(&msg.content).wrap());
-                                                                                            });
-                                                                                    },
-                                                                                );
-                                                                            },
-                                                                        );
-                                                                        if i + 1 < len {
-                                                                            ui.add_space(4.0);
-                                                                        }
-                                                                    }
-                                                                });
+                                ui.horizontal(|ui| {
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(chat_column_width, row_height),
+                                        egui::Layout::top_down(egui::Align::Min),
+                                        |ui| {
+                                            ui.set_min_height(row_height);
+                                            ui.set_height(row_height);
+                                            egui::Frame::default()
+                                                .stroke(egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color))
+                                                .inner_margin(egui::Margin::same(0))
+                                                .show(ui, |ui| {
+                                                    ui.set_min_height(row_height - 60.0); // Account for input row
+                                                    ui.set_height(row_height - 60.0); // Account for input row
+                                                    ui.set_width((ui.available_width() - 40.0).max(0.0)); // Account for additions on left
+                                                    egui::Frame::new()
+                                                        .inner_margin(egui::Margin::same(4))
+                                                        .show(ui, |ui| {
+                                                            let input_row_height = 28.0;
+                                                            let bottom_gap = 6.0;
+                                                            let messages_height =
+                                                                (ui.available_height() - input_row_height - bottom_gap)
+                                                                    .max(0.0);
+                                                            ui.allocate_ui_with_layout(
+                                                                egui::vec2(ui.available_width(), messages_height),
+                                                                egui::Layout::top_down(egui::Align::Min),
+                                                                |ui| {
+                                                                    ui.set_min_height(messages_height);
+                                                                    egui::ScrollArea::vertical()
+                                                                        .stick_to_bottom(true)
+                                                                        .show(ui, |ui| {
+                                                                            ui.vertical(|ui| {
+                                                                                ui.set_width(ui.available_width());
+                                                                                let len = chat.messages.len();
+                                                                                let time_col_width = 82.0;
+                                                                                for (i, msg) in chat.messages.iter().enumerate() {
+                                                                                    ui.allocate_ui_with_layout(
+                                                                                        egui::vec2(ui.available_width(), 0.0),
+                                                                                        egui::Layout::left_to_right(egui::Align::Min),
+                                                                                        |ui| {
+                                                                                            // Fixed left column for timestamps.
+                                                                                            ui.allocate_ui_with_layout(
+                                                                                                egui::vec2(time_col_width, 0.0),
+                                                                                                egui::Layout::top_down(egui::Align::Min),
+                                                                                                |ui| {
+                                                                                                    egui::Frame::new()
+                                                                                                        .fill(ui.visuals().widgets.inactive.bg_fill)
+                                                                                                        .stroke(egui::Stroke::new(0.5, ui.visuals().widgets.noninteractive.bg_stroke.color))
+                                                                                                        .corner_radius(egui::CornerRadius::same(2))
+                                                                                                        .inner_margin(egui::Margin::symmetric(6, 2))
+                                                                                                        .show(ui, |ui| {
+                                                                                                            let ts = chat
+                                                                                                                .message_timestamps
+                                                                                                                .get(i)
+                                                                                                                .cloned()
+                                                                                                                .unwrap_or_else(|| "--:--:--".to_string());
+                                                                                                            ui.label(ts);
+                                                                                                        });
+                                                                                                },
+                                                                                            );
+
+                                                                                            let msg_width = (ui.available_width() - ui.spacing().item_spacing.x)
+                                                                                                .max(0.0);
+                                                                                            ui.allocate_ui_with_layout(
+                                                                                                egui::vec2(msg_width, 0.0),
+                                                                                                egui::Layout::top_down(egui::Align::Min),
+                                                                                                |ui| {
+                                                                                                    // Message bubble — wraps to available width.
+                                                                                                    egui::Frame::new()
+                                                                                                        .fill(ui.visuals().extreme_bg_color)
+                                                                                                        .stroke(egui::Stroke::new(0.5, ui.visuals().widgets.noninteractive.bg_stroke.color))
+                                                                                                        .corner_radius(egui::CornerRadius::same(2))
+                                                                                                        .inner_margin(egui::Margin::symmetric(8, 4))
+                                                                                                        .show(ui, |ui| {
+                                                                                                            ui.set_max_width(ui.available_width());
+                                                                                                            ui.add(egui::Label::new(&msg.content).wrap());
+                                                                                                        });
+                                                                                                },
+                                                                                            );
+                                                                                        },
+                                                                                    );
+                                                                                    if i + 1 < len {
+                                                                                        ui.add_space(4.0);
+                                                                                    }
+                                                                                }
+                                                                            });
+                                                                        });
+                                                                },
+                                                            );
+                                                        });
+                                                });
+
+                                            ui.add_space(6.0);
+
+                                            if *chat.waiting_for_response().lock().unwrap() {
+                                                ui.horizontal(|ui| {
+                                                    ui.spinner();
+                                                    ui.label(
+                                                        egui::RichText::new("Waiting for assistant response...")
+                                                            .small()
+                                                            .weak(),
+                                                    );
+                                                });
+                                            }
+                                            ui.add_enabled_ui(human_to_agent_mode, |ui| {
+                                                ui.horizontal(|ui| {
+                                                    let response = ui.add(
+                                                        egui::TextEdit::singleline(&mut chat.input_text)
+                                                            .hint_text("Type a message")
+                                                            .desired_width(300.0),
+                                                    );
+                                                    let send_clicked = ui
+                                                        .add(egui::Button::new("Send"))
+                                                        .clicked()
+                                                        || (response.lost_focus()
+                                                            && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+
+                                                    if send_clicked && !chat.input_text.trim().is_empty() {
+                                                        let message_text = chat.input_text.trim().to_string();
+                                                        chat.input_text.clear();
+
+                                                        let user_message = ChatMessage {
+                                                            content: message_text.clone(),
+                                                            from: Some("Human".to_string()),
+                                                            correlation: None,
+                                                            source: MessageSource::Human,
+                                                            api_auto_respond: false,
+                                                            assistant_generation: None,
+                                                        };
+                                                        let ts = ChatExample::current_timestamp_string();
+                                                        chat.messages.push(user_message.clone());
+                                                        chat.message_timestamps.push(ts.clone());
+
+                                                        if let Some(room_id) = &chat.selected_room {
+                                                            let _ = store.append_message(room_id, &user_message, &ts);
+                                                        }
+
+                                                        let tx = chat.inbox.sender();
+                                                        let waiting = chat.waiting_for_response().clone();
+                                                        let selected_room = chat.selected_room.clone();
+                                                        let store_path = std::path::PathBuf::from("metrics/overview_chat.sqlite");
+                                                        let model = self.selected_ollama_model.trim().to_string();
+                                                        if model.is_empty() {
+                                                            let _ = tx.send(ChatMessage {
+                                                                content: "Please select a global Ollama model in Settings.".to_string(),
+                                                                from: Some("System".to_string()),
+                                                                correlation: None,
+                                                                source: MessageSource::System,
+                                                                api_auto_respond: false,
+                                                                assistant_generation: None,
                                                             });
-                                                    },
-                                                );
+                                                        } else {
+                                                            if let Ok(mut flag) = waiting.lock() {
+                                                                *flag = true;
+                                                            }
+                                                            self.rt_handle.spawn(async move {
+                                                                let request = vec![crate::ui::overview_chat::ollama::OllamaMessage {
+                                                                    role: "user".to_string(),
+                                                                    content: message_text,
+                                                                }];
+                                                                let out = crate::ui::overview_chat::ollama::chat(
+                                                                    &model,
+                                                                    &request,
+                                                                    crate::ui::overview_chat::ollama::OllamaChatOptions::default(),
+                                                                )
+                                                                .await;
+                                                                let reply = match out {
+                                                                    Ok(content) => ChatMessage {
+                                                                        content: content.trim_end().to_string(),
+                                                                        from: Some("Assistant".to_string()),
+                                                                        correlation: None,
+                                                                        source: MessageSource::Api,
+                                                                        api_auto_respond: false,
+                                                                        assistant_generation: None,
+                                                                    },
+                                                                    Err(e) => ChatMessage {
+                                                                        content: format!("Ollama error: {e}"),
+                                                                        from: Some("System".to_string()),
+                                                                        correlation: None,
+                                                                        source: MessageSource::System,
+                                                                        api_auto_respond: false,
+                                                                        assistant_generation: None,
+                                                                    },
+                                                                };
+                                                                if let Some(room_id) = selected_room
+                                                                    && let Ok(store) = crate::ui::overview_chat::store::Store::open(store_path)
+                                                                {
+                                                                    let ts = ChatExample::display_time_for_message(&reply);
+                                                                    let _ = store.append_message(&room_id, &reply, &ts);
+                                                                }
+                                                                let _ = tx.send(reply);
+                                                                if let Ok(mut flag) = waiting.lock() {
+                                                                    *flag = false;
+                                                                }
+                                                            });
+                                                        }
+                                                    }
+                                                });
                                             });
-                                    });
-
-                                ui.add_space(6.0);
-                                if !human_to_agent_mode {
-                                    ui.label(
-                                        egui::RichText::new(
-                                            "Agent-to-agent mode active. Human input is disabled.",
-                                        )
-                                        .small()
-                                        .weak(),
+                                        },
                                     );
-                                }
-                                if *chat.waiting_for_response().lock().unwrap() {
-                                    ui.horizontal(|ui| {
-                                        ui.spinner();
-                                        ui.label(
-                                            egui::RichText::new("Waiting for assistant response...")
-                                                .small()
-                                                .weak(),
-                                        );
-                                    });
-                                }
-                                ui.add_enabled_ui(human_to_agent_mode, |ui| {
-                                    ui.horizontal(|ui| {
-                                        let response = ui.add(
-                                            egui::TextEdit::singleline(&mut chat.input_text)
-                                                .hint_text("Type a message")
-                                                .desired_width(300.0),
-                                        );
-                                        let send_clicked = ui
-                                            .add(egui::Button::new("Send"))
-                                            .clicked()
-                                            || (response.lost_focus()
-                                                && ui.input(|i| i.key_pressed(egui::Key::Enter)));
 
-                                        if send_clicked && !chat.input_text.trim().is_empty() {
-                                            let message_text = chat.input_text.trim().to_string();
-                                            chat.input_text.clear();
-
-                                            let user_message = ChatMessage {
-                                                content: message_text.clone(),
-                                                from: Some("Human".to_string()),
-                                                correlation: None,
-                                                source: MessageSource::Human,
-                                                api_auto_respond: false,
-                                                assistant_generation: None,
-                                            };
-                                            let ts = ChatExample::current_timestamp_string();
-                                            chat.messages.push(user_message.clone());
-                                            chat.message_timestamps.push(ts.clone());
-
-                                            if let Some(room_id) = &chat.selected_room {
-                                                let _ = store.append_message(room_id, &user_message, &ts);
-                                            }
-
-                                            let tx = chat.inbox.sender();
-                                            let waiting = chat.waiting_for_response().clone();
-                                            let selected_room = chat.selected_room.clone();
-                                            let store_path = std::path::PathBuf::from("metrics/overview_chat.sqlite");
-                                            let model = self.selected_ollama_model.trim().to_string();
-                                            if model.is_empty() {
-                                                let _ = tx.send(ChatMessage {
-                                                    content: "Please select a global Ollama model in Settings.".to_string(),
-                                                    from: Some("System".to_string()),
-                                                    correlation: None,
-                                                    source: MessageSource::System,
-                                                    api_auto_respond: false,
-                                                    assistant_generation: None,
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(side_column_width, row_height),
+                                        egui::Layout::top_down(egui::Align::Min),
+                                        |ui| {
+                                            ui.set_min_height(row_height);
+                                            ui.set_height(row_height);
+                                            egui::Frame::default()
+                                                .stroke(egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color))
+                                                .inner_margin(egui::Margin::same(8))
+                                                .show(ui, |ui| {
+                                                    ui.set_min_height(row_height - 16.0);
+                                                    ui.vertical(|ui| {
+                                                        ui.label(egui::RichText::new("Right Bar").strong().size(16.0));
+                                                        ui.separator();
+                                                        ui.label(format!(
+                                                            "Selected room: {}",
+                                                            chat.selected_room
+                                                                .as_deref()
+                                                                .unwrap_or("(none)")
+                                                        ));
+                                                        ui.label(format!(
+                                                            "Chat input mode: {}",
+                                                            if human_to_agent_mode { "Enabled" } else { "Disabled" }
+                                                        ));
+                                                        ui.label(format!(
+                                                            "Messages in view: {}",
+                                                            chat.messages.len()
+                                                        ));
+                                                        ui.add_space(8.0);
+                                                        ui.label(
+                                                            egui::RichText::new(
+                                                                "Reserved for the main agent / MAS controls.",
+                                                            )
+                                                            .small()
+                                                            .weak(),
+                                                        );
+                                                    });
                                                 });
-                                            } else {
-                                                if let Ok(mut flag) = waiting.lock() {
-                                                    *flag = true;
-                                                }
-                                                self.rt_handle.spawn(async move {
-                                                    let request = vec![crate::ui::overview_chat::ollama::OllamaMessage {
-                                                        role: "user".to_string(),
-                                                        content: message_text,
-                                                    }];
-                                                    let out = crate::ui::overview_chat::ollama::chat(
-                                                        &model,
-                                                        &request,
-                                                        crate::ui::overview_chat::ollama::OllamaChatOptions::default(),
-                                                    )
-                                                    .await;
-                                                    let reply = match out {
-                                                        Ok(content) => ChatMessage {
-                                                            content: content.trim_end().to_string(),
-                                                            from: Some("Assistant".to_string()),
-                                                            correlation: None,
-                                                            source: MessageSource::Api,
-                                                            api_auto_respond: false,
-                                                            assistant_generation: None,
-                                                        },
-                                                        Err(e) => ChatMessage {
-                                                            content: format!("Ollama error: {e}"),
-                                                            from: Some("System".to_string()),
-                                                            correlation: None,
-                                                            source: MessageSource::System,
-                                                            api_auto_respond: false,
-                                                            assistant_generation: None,
-                                                        },
-                                                    };
-                                                    if let Some(room_id) = selected_room
-                                                        && let Ok(store) = crate::ui::overview_chat::store::Store::open(store_path)
-                                                    {
-                                                        let ts = ChatExample::display_time_for_message(&reply);
-                                                        let _ = store.append_message(&room_id, &reply, &ts);
-                                                    }
-                                                    let _ = tx.send(reply);
-                                                    if let Ok(mut flag) = waiting.lock() {
-                                                        *flag = false;
-                                                    }
-                                                });
-                                            }
-                                        }
-                                    });
+                                        },
+                                    );
                                 });
+
                                 },
                             );
                         });
@@ -554,6 +607,11 @@ impl Arpsci {
                         return;
                     }
                     if self.nodes_panel.active_tab == PanelTab::Settings {
+                        self.render_reproducibility_settings_widgets(ui);
+                        return;
+                    }
+
+                    if !WORKSPACE_MODULE_ENABLED {
                         self.render_reproducibility_settings_widgets(ui);
                         return;
                     }

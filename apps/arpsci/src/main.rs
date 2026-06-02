@@ -21,12 +21,12 @@ fn main() -> eframe::Result<()> {
     }
 
     let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default().with_inner_size([900.0, 840.0]),
+        viewport: eframe::egui::ViewportBuilder::default().with_inner_size([1080.0, 800.0]),
         ..Default::default()
     };
 
     eframe::run_native(
-        "ARPSCI v0.1",
+        "HumxAI (Humai) v0.1",
         options,
         Box::new(move |_cc| Ok(Box::new(ArpsciApp::new(rt_handle.clone())))),
     )

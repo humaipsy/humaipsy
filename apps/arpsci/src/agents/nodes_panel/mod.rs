@@ -10,4 +10,4 @@ mod state;
 pub(crate) use manifest_ops::sync_evaluator_researcher_activity;
 pub(crate) use model::{AgentNodeKind, EvaluatorAgentsPick, NodePayload};
 pub(crate) use presets::TOPIC_PRESETS;
-pub(crate) use state::{AgentRecord, NodesPanelState, PanelTab};
+pub(crate) use state::{AgentRecord, NodesPanelState, PanelTab, WORKSPACE_MODULE_ENABLED};

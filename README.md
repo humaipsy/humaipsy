@@ -41,8 +41,7 @@ docker compose up --build
 ## Rust Application Development
 
 Use these commands when you want to develop only the Rust app.
-The app has its own `.cargo/config.toml` that keeps `target/` local to `apps/arpsci/`,
-so you work entirely inside that directory.
+The app has its own `.cargo/config.toml` that keeps `target/` local to `apps/arpsci/`, so you work entirely inside that directory.
 
 ```sh
 cd ./arp/apps/arpsci
