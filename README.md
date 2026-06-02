@@ -19,7 +19,7 @@ Repository for the ARPSCI ecosystem.
 ## Reproduce
 
 ```sh
-# Automated
+# ARPSCI and Platform
 ./run_all.sh
 
 # Terminal 1:
