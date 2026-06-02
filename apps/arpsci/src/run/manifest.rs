@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const MANIFEST_VERSION: &str = "2.0.0";
-pub const APP_NAME: &str = "arpsci";
+pub const APP_NAME: &str = "humai";
 
 static RUN_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -82,13 +82,7 @@ pub struct RunManifest {
 }
 
 pub fn now_rfc3339_utc() -> String {
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-    chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0)
-        .unwrap_or_else(chrono::Utc::now)
-        .to_rfc3339()
+    crate::recording::timing::now_rfc3339_utc()
 }
 
 pub fn hash_hex(input: &str) -> String {

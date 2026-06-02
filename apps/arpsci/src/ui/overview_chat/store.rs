@@ -1,4 +1,6 @@
+#[path = "store_export.rs"]
 mod export;
+#[path = "store_schema.rs"]
 mod schema;
 
 use std::io;

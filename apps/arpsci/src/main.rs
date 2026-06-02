@@ -1,4 +1,4 @@
-use arpsci::{ArpsciApp, web};
+use humai::{ArpsciApp, web};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 

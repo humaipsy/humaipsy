@@ -5,7 +5,7 @@ use std::time::SystemTime;
 
 use crate::app_state::AppState;
 use crate::metrics::{InferenceTimingEvent, InferenceTraceContext};
-use crate::run::manifest::now_rfc3339_utc;
+use crate::recording::timing::{duration_ms_ceil, duration_us, now_rfc3339_utc, EVENT_TYPE_INFERENCE_TIMING};
 
 mod client;
 mod engine;
@@ -31,19 +31,6 @@ pub struct OllamaInferenceResult {
 
 fn format_rfc3339(ts: SystemTime) -> String {
     chrono::DateTime::<chrono::Utc>::from(ts).to_rfc3339()
-}
-
-fn duration_us(d: std::time::Duration) -> u128 {
-    d.as_micros()
-}
-
-fn duration_ms_ceil(d: std::time::Duration) -> u128 {
-    let us = d.as_micros();
-    if us == 0 {
-        0
-    } else {
-        us.div_ceil(1000)
-    }
 }
 
 pub async fn fetch_ollama_models(ollama_host: &str) -> Result<Vec<String>> {
@@ -95,7 +82,7 @@ pub async fn send_to_ollama_with_result(
         if epoch.load(Ordering::SeqCst) != *caught {
             let t_end_wall = SystemTime::now();
             metrics_sink.record_inference(InferenceTimingEvent {
-                event_type: "inference_timing".to_string(),
+                event_type: EVENT_TYPE_INFERENCE_TIMING.to_string(),
                 timestamp: now_rfc3339_utc(),
                 source: trace_context.source.clone(),
                 experiment_id: trace_context.experiment_id.clone(),
@@ -148,7 +135,7 @@ pub async fn send_to_ollama_with_result(
         Err(e) => {
             let t_end_wall = SystemTime::now();
             metrics_sink.record_inference(InferenceTimingEvent {
-                event_type: "inference_timing".to_string(),
+                event_type: EVENT_TYPE_INFERENCE_TIMING.to_string(),
                 timestamp: now_rfc3339_utc(),
                 source: trace_context.source.clone(),
                 experiment_id: trace_context.experiment_id.clone(),
@@ -184,7 +171,7 @@ pub async fn send_to_ollama_with_result(
     let ttft_ms = infer.ttft.map(duration_ms_ceil);
     let output_chars = infer.text.chars().count();
     metrics_sink.record_inference(InferenceTimingEvent {
-        event_type: "inference_timing".to_string(),
+        event_type: EVENT_TYPE_INFERENCE_TIMING.to_string(),
         timestamp: now_rfc3339_utc(),
         source: trace_context.source,
         experiment_id: trace_context.experiment_id,

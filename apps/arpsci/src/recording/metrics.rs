@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+pub use crate::recording::timing::InferenceTraceContext;
+
 fn default_metrics_file() -> String {
     "metrics/timings.jsonl".to_string()
 }
@@ -43,15 +45,6 @@ impl MetricsConfig {
     pub fn metrics_path(&self) -> PathBuf {
         PathBuf::from(self.metrics_file.trim())
     }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct InferenceTraceContext {
-    pub source: String,
-    pub experiment_id: Option<String>,
-    pub run_id: Option<String>,
-    pub node_global_id: Option<String>,
-    pub turn_index: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -230,6 +223,7 @@ mod tests {
     use super::{
         FileMetricsSink, InferenceTimingEvent, MetricsConfig, MetricsSink, TurnTracker,
     };
+    use crate::recording::timing::EVENT_TYPE_INFERENCE_TIMING;
     use std::fs;
     use std::thread;
     use std::time::Duration;
@@ -248,7 +242,7 @@ mod tests {
         let sink = FileMetricsSink::new(path.as_path()).expect("sink");
 
         sink.record_inference(InferenceTimingEvent {
-            event_type: "inference_timing".to_string(),
+            event_type: EVENT_TYPE_INFERENCE_TIMING.to_string(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
             source: "test".to_string(),
             experiment_id: Some("exp_abc".to_string()),
@@ -275,7 +269,7 @@ mod tests {
         let raw = fs::read_to_string(path).expect("read metrics file");
         assert_eq!(raw.lines().count(), 1);
         let v: serde_json::Value = serde_json::from_str(raw.trim()).expect("valid json line");
-        assert_eq!(v["event_type"], "inference_timing");
+        assert_eq!(v["event_type"], EVENT_TYPE_INFERENCE_TIMING);
         assert_eq!(v["source"], "test");
     }
 

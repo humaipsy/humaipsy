@@ -1,9 +1,9 @@
 [package]
-name = "arpsci"
-description = "A multi-agent dashboard application in Rust"
+name = "humai"
+description = "humai software"
 version = "0.1.0"
 edition = "2024"
-default-run = "arpsci"
+default-run = "humai"
 
 [dependencies]
 

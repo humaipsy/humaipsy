@@ -1,6 +1,6 @@
 //! Writes a PHC Argon2id hash to `runs/.master_hash` using secure defaults.
 
-use arpsci::vault::{VaultKdfParams, hash_master_password_phc};
+use humai::vault::{VaultKdfParams, hash_master_password_phc};
 use std::io::Write;
 use std::path::Path;
 

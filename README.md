@@ -1,8 +1,8 @@
-# ARPSCI Ecosystem
+# HumxAI (Humai) v0.1
 
 Under heavy development. 
 
-Repository for the ARPSCI ecosystem.
+Repository for HumxAI (Humai) v0.1.
 
 ## Dependencies
 
@@ -19,7 +19,7 @@ Repository for the ARPSCI ecosystem.
 ## Reproduce
 
 ```sh
-# ARPSCI and Platform
+# Humai and Platform
 ./run_all.sh
 
 # Terminal 1:
@@ -60,11 +60,7 @@ cargo run --bin gen_master_hash
 
 # Build release binary
 cargo build --release
-```
 
-Useful during iteration:
-
-```sh
 # Run tests
 cargo test
 
@@ -101,4 +97,8 @@ Dashboard static files:
 - `platform/src/ui/index.html`
 - `platform/src/ui/styles.css`
 - `platform/src/ui/app.js`
+
+
+## SOURCE
+
 
