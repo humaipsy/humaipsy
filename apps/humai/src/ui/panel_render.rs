@@ -1,16 +1,10 @@
 use eframe::egui;
 
-use crate::agents::Arpsci;
-use crate::agents::nodes_panel::PanelTab;
+use crate::agents::{Arpsci, MainPanelTab};
 use crate::ui::ArpsciUiState;
 
 impl Arpsci {
-    pub(crate) fn render_nodes_panel(&mut self, ui: &mut egui::Ui, ui_state: &mut ArpsciUiState) {
-        // Workspace tab is deprecated in this UI path.
-        if self.nodes_panel.active_tab == PanelTab::Agents {
-            self.nodes_panel.active_tab = PanelTab::Overview;
-        }
-
+    pub(crate) fn render_main_panel(&mut self, ui: &mut egui::Ui, ui_state: &mut ArpsciUiState) {
         let panel_border_color = ui.visuals().widgets.noninteractive.bg_stroke.color;
         let panel = egui::Frame::default()
             .fill(ui.visuals().panel_fill)
@@ -28,30 +22,30 @@ impl Arpsci {
                     ui.horizontal(|ui| {
                         if ui
                             .selectable_label(
-                                self.nodes_panel.active_tab == PanelTab::Overview,
+                                self.active_tab == MainPanelTab::Overview,
                                 "Overview",
                             )
                             .clicked()
                         {
-                            self.nodes_panel.active_tab = PanelTab::Overview;
+                            self.active_tab = MainPanelTab::Overview;
                         }
                         if ui
                             .selectable_label(
-                                self.nodes_panel.active_tab == PanelTab::Ollama,
+                                self.active_tab == MainPanelTab::Ollama,
                                 "Ollama",
                             )
                             .clicked()
                         {
-                            self.nodes_panel.active_tab = PanelTab::Ollama;
+                            self.active_tab = MainPanelTab::Ollama;
                         }
                         if ui
                             .selectable_label(
-                                self.nodes_panel.active_tab == PanelTab::Settings,
+                                self.active_tab == MainPanelTab::Settings,
                                 "Settings",
                             )
                             .clicked()
                         {
-                            self.nodes_panel.active_tab = PanelTab::Settings;
+                            self.active_tab = MainPanelTab::Settings;
                         }
                         if self.air_gap_enabled {
                             ui.add_space(8.0);
@@ -69,15 +63,15 @@ impl Arpsci {
                     });
                     ui.separator();
 
-                    match self.nodes_panel.active_tab {
-                        PanelTab::Overview | PanelTab::Agents => {
+                    match self.active_tab {
+                        MainPanelTab::Overview => {
                             crate::ui::overview_chat::render_overview_panel(self, ui);
                         }
-                        PanelTab::Ollama => {
+                        MainPanelTab::Ollama => {
                             let ctx = ui.ctx().clone();
                             self.render_ollama_settings_widgets(ui, &ctx, ui_state);
                         }
-                        PanelTab::Settings => {
+                        MainPanelTab::Settings => {
                             self.render_reproducibility_settings_widgets(ui);
                         }
                     }

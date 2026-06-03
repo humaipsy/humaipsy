@@ -1,8 +1,11 @@
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
 use egui_phosphor::regular;
@@ -19,6 +22,7 @@ static ROOM_ORDER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 pub(crate) static HUMAI_EXPDESIGN: OnceLock<Mutex<HumaiExpDesign>> = OnceLock::new();
 static MAIN_TIMER: OnceLock<Mutex<MainTimerState>> = OnceLock::new();
 static EXPERIMENT_SESSION: OnceLock<Mutex<ExperimentSessionState>> = OnceLock::new();
+static EXP_RUN_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 static GLOBAL_INPUT_MODAL: OnceLock<Mutex<InputModalState>> = OnceLock::new();
 
@@ -144,6 +148,25 @@ fn pause_main_timer() {
     {
         timer.pause();
     }
+}
+
+fn experiment_hash_hex(input: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    input.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn derive_experiment_id_local(signature: &str) -> String {
+    format!("exp_{}", &experiment_hash_hex(signature)[..12])
+}
+
+fn new_run_id_local() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let count = EXP_RUN_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("run_{}_{:04}", millis, count)
 }
 
 fn set_experiment_running(is_running: bool) {
@@ -318,13 +341,13 @@ fn start_experiment_from_play(app: &Arpsci, store: &Store, chat: &mut ChatExampl
 
     let topic = design.topic.trim().to_string();
     let participant_id = design.participant_id.trim().to_string();
-    let experiment_id = crate::run::manifest::derive_experiment_id(&format!(
+    let experiment_id = derive_experiment_id_local(&format!(
         "{}|{}|{}",
         design.name.trim(),
         participant_id,
         topic
     ));
-    let run_id = crate::run::manifest::new_run_id();
+    let run_id = new_run_id_local();
 
     if let Some(state) = session.as_deref_mut() {
         state.running = true;
@@ -485,7 +508,7 @@ pub(crate) fn render_overview_panel(app: &mut Arpsci, ui: &mut egui::Ui) {
     let mut chat = chat_cell.lock().unwrap();
 
     let graph_running = app.conversation_graph_running.load(Ordering::Acquire);
-    let human_to_agent_mode = matches!(app.chat_mode, GlobalChatMode::HumanToAgent);
+    let human_to_agent_mode = matches!(app.chat_mode, GlobalChatMode::Enabled);
     chat.room_mode_human_agent = human_to_agent_mode;
     chat.set_main_input_enabled(human_to_agent_mode);
 
@@ -508,12 +531,12 @@ pub(crate) fn render_overview_panel(app: &mut Arpsci, ui: &mut egui::Ui) {
         ui.add_enabled_ui(!graph_running, |ui| {
             ui.selectable_value(
                 &mut app.chat_mode,
-                GlobalChatMode::HumanToAgent,
+                GlobalChatMode::Enabled,
                 "Enabled",
             );
             ui.selectable_value(
                 &mut app.chat_mode,
-                GlobalChatMode::AgentToAgent,
+                GlobalChatMode::Disabled,
                 "Disabled",
             );
         });

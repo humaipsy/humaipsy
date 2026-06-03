@@ -167,68 +167,6 @@ impl Arpsci {
 
     pub(super) fn render_reproducibility_settings_widgets(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
-            ui.label(egui::RichText::new("Air-gap Policy").strong().size(16.0));
-            ui.separator();
-
-            let mut policy_changed = false;
-            ui.horizontal(|ui| {
-                if ui
-                    .checkbox(
-                        &mut self.air_gap_enabled,
-                        "Enable air-gap mode (block non-loopback HTTP)",
-                    )
-                    .changed()
-                {
-                    policy_changed = true;
-                }
-            });
-            ui.horizontal(|ui| {
-                if ui
-                    .checkbox(
-                        &mut self.allow_local_ollama,
-                        "Allow local Ollama (127.0.0.1 / ::1 / localhost)",
-                    )
-                    .changed()
-                {
-                    policy_changed = true;
-                }
-            });
-
-            if self.air_gap_enabled {
-                ui.label(
-                    egui::RichText::new(
-                        "Verification: outbound HTTP is blocked unless target is loopback; blocked attempts are written to the run ledger as transport.http_blocked.",
-                    )
-                    .small(),
-                );
-                if self.allow_local_ollama {
-                    ui.label(
-                        egui::RichText::new("Allowed: loopback Ollama + local file I/O.")
-                            .small()
-                            .weak(),
-                    );
-                } else {
-                    ui.label(
-                        egui::RichText::new(
-                            "Allowed: local file I/O only (Ollama requests are blocked).",
-                        )
-                        .small()
-                        .weak(),
-                    );
-                }
-            } else {
-                ui.label(
-                    egui::RichText::new("Verification: outbound HTTP is currently enabled.")
-                        .small()
-                        .weak(),
-                );
-            }
-
-            if policy_changed {
-                self.sync_http_policy();
-            }
-
-            ui.add_space(10.0);
             ui.label(egui::RichText::new("Timing and Metrics").strong().size(16.0));
             ui.separator();
             let mut metrics_changed = false;

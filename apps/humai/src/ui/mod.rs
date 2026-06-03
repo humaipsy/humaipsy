@@ -207,7 +207,7 @@ impl eframe::App for ArpsciApp {
 		egui::CentralPanel::default().show(ctx, |ui| {
 			ui.vertical(|ui| {
 				ui.set_min_height(ui.available_height());
-				self.ams_agents.render_nodes_panel(ui, &mut self.ui_state);
+				self.ams_agents.render_main_panel(ui, &mut self.ui_state);
 			});
 		});
 	}

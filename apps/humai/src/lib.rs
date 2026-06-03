@@ -6,7 +6,6 @@ pub mod agents;
 pub mod metrics;
 pub mod ollama;
 pub mod recording;
-pub mod run;
 pub mod ui;
 pub mod vault;
 pub mod web;
