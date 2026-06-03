@@ -5,8 +5,28 @@ Under heavy development.
 Repository for HumxAI (Humai) v0.1.
 
 - Cross-platform Application for Human-AI Interaction
-- Design Experimental Testing
-- Integrated with Ollama (locally and offline)
+- Design Experimental Tests
+- Integrated with open-weight models 
+- Local and offline first-field architecture
+
+
+## Installation Windows/Linux
+
+Installation distribution.
+
+<details>
+<summary>Distribute</summary>
+<br>
+</details>
+
+## Source
+
+Hello.
+
+<details>
+<summary>Architecture</summary>
+<br>
+</details>
 
 ## Dependencies
 
@@ -19,38 +39,17 @@ Repository for HumxAI (Humai) v0.1.
 - uv (latest stable)
 
 
-## SOURCE
-
-
 
 ## Reproduce
 
-```sh
-# Humai and Platform
-./run_all.sh
+Development 
 
-# Terminal 1:
-cd ./arp/platform
-uv sync --dev
-uv run uvicorn src.host_runner_main:app --host 127.0.0.1 --port 8090
-
-# Terminal 2:
-cd ./arp
-docker compose up --build
-
-# Visit:
-# http://localhost:8080/ (platform dashboard)
-# http://localhost:8081/ (docs)
-```
-
-
-
-## Rust Application Development
-
-Use these commands when you want to develop only the Rust app.
-The app has its own `.cargo/config.toml` that keeps `target/` local to `apps/arpsci/`, so you work entirely inside that directory.
+<details>
+<summary>Commands</summary>
+<br>
 
 ```sh
+# Rust Application Development
 cd ./arp/apps/arpsci
 
 # Fast compile check (all bins and tests)
@@ -74,16 +73,24 @@ cargo test
 # Format and lint (if needed before commit)
 cargo fmt
 cargo clippy --all-targets -- -D warnings
-```
 
+# Run Platform
+./run_all.sh
 
-## Python platform
-
-```sh
-cd platform
+# Terminal 1:
+cd ./arp/platform
 uv sync --dev
-uv run uvicorn src.main:app --reload --host 127.0.0.1 --port 8080
+uv run uvicorn src.host_runner_main:app --host 127.0.0.1 --port 8090
+
+# Terminal 2:
+cd ./arp
+docker compose up --build
+
+# Visit:
+# http://localhost:8080/ (platform dashboard)
+# http://localhost:8081/ (docs)
 ```
+
 
 Platform endpoints:
 
@@ -106,3 +113,10 @@ Dashboard static files:
 - `platform/src/ui/app.js`
 
 
+</details>
+
+
+
+## License
+
+Proprietary
