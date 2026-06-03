@@ -12,7 +12,7 @@ impl Room {
     }
 }
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -21,6 +21,10 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use super::incoming::MessageSource;
+
+static RENAME_ROOM_MODAL_OPEN: OnceLock<Mutex<bool>> = OnceLock::new();
+static RENAME_ROOM_INPUT: OnceLock<Mutex<String>> = OnceLock::new();
+static RENAME_ROOM_TARGET_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 pub struct UiInbox<T> {
     tx: Sender<T>,
@@ -123,9 +127,10 @@ impl ChatExample {
         };
 
         let rooms_section_height = ui.available_height();
-        let rooms_list_height = 100.0;
+        let rooms_list_height = 200.0;
 
         
+
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), rooms_section_height),
             egui::Layout::top_down(egui::Align::Min),
@@ -133,33 +138,62 @@ impl ChatExample {
                 egui::Frame::new()
                     .inner_margin(egui::Margin::symmetric(4, 0))
                     .show(ui, |ui| {
-                        // ui.label("Room Settings");
+                        ui.label(egui::RichText::new("Main Timer").strong().size(16.0));
+                        Self::render_full_width_value_row(ui, "00:00:00");
+
+                        Self::section_separator(ui);
+
+                        ui.label(egui::RichText::new("Participant ID").strong().size(16.0));
+                        let participant_id = super::panel::PARTICIPANT_ID
+                            .get_or_init(|| std::sync::Mutex::new(String::new()))
+                            .lock()
+                            .map(|value| {
+                                let trimmed = value.trim();
+                                if trimmed.is_empty() {
+                                    "NONE".to_string()
+                                } else {
+                                    trimmed.to_string()
+                                }
+                            })
+                            .unwrap_or_else(|_| "NONE".to_string());
+                        Self::render_full_width_value_row(ui, &participant_id);
+
+                        Self::section_separator(ui);
+
                         ui.label(egui::RichText::new("Room Settings").strong().size(16.0));
 
+                        if ui.button("New Room").clicked() {
+                            let name = format!("Room {}", self.rooms.len() + 1);
+                            self.add_room(name, &mut store);
+                        }
 
-                        ui.horizontal(|ui| {
-                            if ui.button("New room").clicked() {
-                                let name = format!("Room {}", self.rooms.len() + 1);
-                                self.add_room(name, &mut store);
+                        if ui
+                            .add_enabled(
+                                self.selected_room.is_some(),
+                                egui::Button::new("Clear Room"),
+                            )
+                            .on_hover_text("Clear messages in the current room")
+                            .clicked()
+                        {
+                            if let Some(room_id) = self.selected_room.as_ref() {
+                                let _ = store.delete_messages_for_conversation(room_id);
+                                self.messages.clear();
+                                self.message_timestamps.clear();
                             }
-                            if ui
-                                .add_enabled(
-                                    self.selected_room.is_some(),
-                                    egui::Button::new("Clear Room"),
-                                )
-                                .on_hover_text("Clear messages in the current room")
-                                .clicked()
-                            {
-                                if let Some(room_id) = self.selected_room.as_ref() {
-                                    let _ = store.delete_messages_for_conversation(room_id);
-                                    self.messages.clear();
-                                    self.message_timestamps.clear();
-                                }
-                            }
-                        });
+                        }
 
-                        ui.separator();
-                        ui.spacing_mut().item_spacing.y = 2.0;
+                        if ui
+                            .add_enabled(
+                                self.selected_room.is_some(),
+                                egui::Button::new("Rename Room"),
+                            )
+                            .on_hover_text("Rename the current room")
+                            .clicked()
+                        {
+                            self.open_rename_room_modal();
+                        }
+
+                        Self::section_separator(ui);
 
                         let mut delete_room_id: Option<String> = None;
                         egui::ScrollArea::vertical()
@@ -201,11 +235,137 @@ impl ChatExample {
                             }
                         }
                     });
+                    ui.separator();
+                    ui.spacing_mut().item_spacing.y = 2.0;
             },
         );
 
-        // Separator between the constrained room section and any future sidebar widgets.
+        self.render_rename_room_modal(ui.ctx(), &mut store);
+
+    }
+
+    fn section_separator(ui: &mut Ui) {
         ui.separator();
+        ui.spacing_mut().item_spacing.y = 2.0;
+    }
+
+    fn render_full_width_value_row(ui: &mut Ui, value: &str) {
+        let width = ui.available_width().max(0.0);
+        let height = ui.spacing().interact_size.y;
+        egui::Frame::new()
+            .fill(ui.visuals().widgets.inactive.bg_fill)
+            .stroke(ui.visuals().widgets.inactive.bg_stroke)
+            .inner_margin(egui::Margin::symmetric(8, 1))
+            .show(ui, |ui| {
+                ui.set_height(height);
+                ui.set_min_width(width);
+                ui.set_max_width(width);
+                ui.with_layout(
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.label(egui::RichText::new(value).size(14.0).strong());
+                    },
+                );
+            });
+    }
+
+    fn open_rename_room_modal(&mut self) {
+        let Some(target_id) = self.selected_room.clone() else {
+            return;
+        };
+
+        let initial_name = self
+            .rooms
+            .iter()
+            .find(|room| room.id == target_id)
+            .map(|room| room.name.clone())
+            .unwrap_or_default();
+
+        if let Ok(mut input) = RENAME_ROOM_INPUT
+            .get_or_init(|| Mutex::new(String::new()))
+            .lock()
+        {
+            *input = initial_name;
+        }
+
+        if let Ok(mut target) = RENAME_ROOM_TARGET_ID
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+        {
+            *target = Some(target_id);
+        }
+
+        if let Ok(mut open) = RENAME_ROOM_MODAL_OPEN.get_or_init(|| Mutex::new(false)).lock() {
+            *open = true;
+        }
+    }
+
+    fn render_rename_room_modal(&mut self, ctx: &egui::Context, store: &mut super::store::Store) {
+        let mut is_open = RENAME_ROOM_MODAL_OPEN
+            .get_or_init(|| Mutex::new(false))
+            .lock()
+            .map(|value| *value)
+            .unwrap_or(false);
+
+        if !is_open {
+            return;
+        }
+
+        let mut close_modal = false;
+        egui::Window::new("Rename Room")
+            .collapsible(false)
+            .resizable(false)
+            .movable(false)
+            .fixed_size(egui::vec2(420.0, 140.0))
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                ui.label("New room name");
+                ui.add_space(8.0);
+
+                if let Ok(mut input) = RENAME_ROOM_INPUT
+                    .get_or_init(|| Mutex::new(String::new()))
+                    .lock()
+                {
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut *input)
+                            .hint_text("Type room name")
+                            .desired_width(360.0),
+                    );
+
+                    ui.add_space(10.0);
+                    let ok_clicked = ui.button("OK").clicked()
+                        || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+
+                    if ok_clicked {
+                        let new_name = input.trim().to_string();
+                        if !new_name.is_empty() {
+                            let target_id = RENAME_ROOM_TARGET_ID
+                                .get_or_init(|| Mutex::new(None))
+                                .lock()
+                                .ok()
+                                .and_then(|value| value.clone());
+
+                            if let Some(room_id) = target_id {
+                                if let Some(room) = self.rooms.iter_mut().find(|room| room.id == room_id)
+                                {
+                                    room.name = new_name.clone();
+                                }
+                                let _ = store.rename_conversation(&room_id, &new_name);
+                            }
+                        }
+                        close_modal = true;
+                    }
+                }
+            });
+
+        if close_modal {
+            is_open = false;
+        }
+
+        if let Ok(mut open) = RENAME_ROOM_MODAL_OPEN.get_or_init(|| Mutex::new(false)).lock() {
+            *open = is_open;
+        }
     }
 
     pub fn current_timestamp_string() -> String {
@@ -232,7 +392,7 @@ impl ChatExample {
 
     pub fn default_welcome() -> (ChatMessage, String) {
         let msg = ChatMessage {
-            content: "openchat-cogsci Started".to_string(),
+            content: "humai Started".to_string(),
             from: Some("System".to_string()),
             correlation: None,
             source: MessageSource::System,

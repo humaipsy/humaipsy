@@ -77,6 +77,7 @@ impl Default for ConversationSettings {
 #[derive(Debug, Clone)]
 pub struct ConversationSummary {
     pub id: String,
+    pub name: String,
     pub updated_at: String,
 }
 
@@ -219,8 +220,11 @@ impl Store {
         let mut out = Vec::new();
         for row in rows {
             let (id, name, updated_at) = row?;
-            let _ = name;
-            out.push(ConversationSummary { id, updated_at });
+            out.push(ConversationSummary {
+                id,
+                name,
+                updated_at,
+            });
         }
         Ok(out)
     }

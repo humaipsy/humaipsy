@@ -18,6 +18,10 @@ static ROOM_ORDER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 pub(crate) static EXPERIMENT_NAME: OnceLock<Mutex<String>> = OnceLock::new();
 pub(crate) static EXPERIMENT_CSV_NAME: OnceLock<Mutex<String>> = OnceLock::new();
 pub(crate) static FINAL_PARTICIPANT_QUESTION: OnceLock<Mutex<String>> = OnceLock::new();
+pub(crate) static PARTICIPANT_ID: OnceLock<Mutex<String>> = OnceLock::new();
+
+static PARTICIPANT_ID_MODAL_OPEN: OnceLock<Mutex<bool>> = OnceLock::new();
+static PARTICIPANT_ID_MODAL_INPUT: OnceLock<Mutex<String>> = OnceLock::new();
 
 pub(crate) fn selected_room_id() -> Option<String> {
     CHAT.get()
@@ -44,9 +48,14 @@ pub(crate) fn render_overview_panel(app: &mut Arpsci, ui: &mut egui::Ui) {
     let mut rooms_by_id: HashMap<String, Room> = convs
         .iter()
         .map(|c| {
+            let label = if c.name.trim().is_empty() {
+                format!("Room {}", &c.id[..8])
+            } else {
+                c.name.clone()
+            };
             (
                 c.id.clone(),
-                Room::new(c.id.clone(), format!("Room {}", &c.id[..8])),
+                Room::new(c.id.clone(), label),
             )
         })
         .collect();
@@ -496,13 +505,22 @@ fn render_right_bar(
                     EXPERIMENT_CSV_NAME.get_or_init(|| Mutex::new("Exp001.csv".to_string()));
                 let final_participant_question = FINAL_PARTICIPANT_QUESTION
                     .get_or_init(|| Mutex::new(String::new()));
+                let selected_room_id = chat.selected_room.as_deref().unwrap_or("(none)");
+                let selected_room_name = chat
+                    .selected_room
+                    .as_ref()
+                    .and_then(|id| {
+                        chat.rooms
+                            .iter()
+                            .find(|room| room.id == *id)
+                            .map(|room| room.name.as_str())
+                    })
+                    .unwrap_or("(none)");
 
                 ui.label(egui::RichText::new("Experimental Control Panel").strong().size(16.0));
                 ui.separator();
-                ui.label(format!(
-                    "Selected room: {}",
-                    chat.selected_room.as_deref().unwrap_or("(none)")
-                ));
+                ui.label(format!("Selected room ID: {selected_room_id}"));
+                ui.label(format!("Selected room name: {selected_room_name}"));
                 ui.label(format!(
                     "Chat input mode: {}",
                     if human_to_agent_mode { "Enabled" } else { "Disabled" }
@@ -749,7 +767,9 @@ fn render_right_bar(
                                         ui.add_space(50.0);
                                         ui.horizontal(|ui| {
                                             let _ = ui.button("Reset");
-                                            let _ = ui.button("Submit");
+                                            if ui.button("Submit").clicked() {
+                                                open_participant_id_modal();
+                                            }
                                             let _ = ui.button("Download");
                                             let _ = ui.button("Upload");
                                         });
@@ -763,4 +783,90 @@ fn render_right_bar(
                 
             });
         });
+
+    render_participant_id_modal(ui.ctx());
+}
+
+fn open_participant_id_modal() {
+    let participant_id = PARTICIPANT_ID
+        .get_or_init(|| Mutex::new(String::new()))
+        .lock()
+        .map(|value| value.clone())
+        .unwrap_or_default();
+
+    if let Ok(mut input) = PARTICIPANT_ID_MODAL_INPUT
+        .get_or_init(|| Mutex::new(String::new()))
+        .lock()
+    {
+        *input = participant_id;
+    }
+
+    if let Ok(mut open) = PARTICIPANT_ID_MODAL_OPEN.get_or_init(|| Mutex::new(false)).lock() {
+        *open = true;
+    }
+}
+
+fn render_participant_id_modal(ctx: &egui::Context) {
+    let mut is_open = PARTICIPANT_ID_MODAL_OPEN
+        .get_or_init(|| Mutex::new(false))
+        .lock()
+        .map(|value| *value)
+        .unwrap_or(false);
+
+    if !is_open {
+        return;
+    }
+
+    let rect = ctx.content_rect();
+    let modal_size = egui::vec2((rect.width() * 0.6).max(320.0), (rect.height() * 0.6).max(220.0));
+    let mut close_modal = false;
+
+    egui::Window::new("Participant ID")
+        .collapsible(false)
+        .resizable(false)
+        .movable(false)
+        .fixed_size(modal_size)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .open(&mut is_open)
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(8.0);
+                ui.label("Participant ID");
+                ui.add_space(8.0);
+
+                if let Ok(mut input) = PARTICIPANT_ID_MODAL_INPUT
+                    .get_or_init(|| Mutex::new(String::new()))
+                    .lock()
+                {
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut *input)
+                            .hint_text("Type participant ID")
+                            .desired_width((modal_size.x * 0.6).max(220.0)),
+                    );
+
+                    ui.add_space(16.0);
+                    let ok_clicked = ui.button("OK").clicked()
+                        || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+
+                    if ok_clicked {
+                        let value = input.trim().to_string();
+                        if let Ok(mut global_id) = PARTICIPANT_ID
+                            .get_or_init(|| Mutex::new(String::new()))
+                            .lock()
+                        {
+                            *global_id = value;
+                        }
+                        close_modal = true;
+                    }
+                }
+            });
+        });
+
+    if close_modal {
+        is_open = false;
+    }
+
+    if let Ok(mut open) = PARTICIPANT_ID_MODAL_OPEN.get_or_init(|| Mutex::new(false)).lock() {
+        *open = is_open;
+    }
 }
