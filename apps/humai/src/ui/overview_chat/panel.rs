@@ -15,13 +15,76 @@ use super::store::Store;
 static CHAT: OnceLock<Mutex<ChatExample>> = OnceLock::new();
 static ACTIVE_ROOM_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static ROOM_ORDER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
-pub(crate) static EXPERIMENT_NAME: OnceLock<Mutex<String>> = OnceLock::new();
-pub(crate) static EXPERIMENT_CSV_NAME: OnceLock<Mutex<String>> = OnceLock::new();
-pub(crate) static FINAL_PARTICIPANT_QUESTION: OnceLock<Mutex<String>> = OnceLock::new();
-pub(crate) static PARTICIPANT_ID: OnceLock<Mutex<String>> = OnceLock::new();
+pub(crate) static HUMAI_EXPDESIGN: OnceLock<Mutex<HumaiExpDesign>> = OnceLock::new();
 
-static PARTICIPANT_ID_MODAL_OPEN: OnceLock<Mutex<bool>> = OnceLock::new();
-static PARTICIPANT_ID_MODAL_INPUT: OnceLock<Mutex<String>> = OnceLock::new();
+static GLOBAL_INPUT_MODAL: OnceLock<Mutex<InputModalState>> = OnceLock::new();
+
+#[derive(Clone, Debug)]
+pub(crate) struct HumaiExpDesign {
+    pub name: String,
+    pub csv_name: String,
+    pub participant_id: String,
+    pub groups: u32,
+    pub conditions: u32,
+    pub blocks: u32,
+    pub trials: u32,
+    pub trial_seconds: u32,
+    pub topic: String,
+    pub question: String,
+}
+
+impl Default for HumaiExpDesign {
+    fn default() -> Self {
+        Self {
+            name: "Exp001".to_string(),
+            csv_name: "Exp001.csv".to_string(),
+            participant_id: String::new(),
+            groups: 1,
+            conditions: 2,
+            blocks: 2,
+            trials: 2,
+            trial_seconds: 3000,
+            topic: "computer architecture".to_string(),
+            question: String::new(),
+        }
+    }
+}
+
+impl HumaiExpDesign {
+    fn sync_csv_name_from_name(&mut self) {
+        self.csv_name = format!("{}.csv", self.name.trim());
+    }
+}
+
+#[derive(Clone, Debug)]
+enum ModalAction {
+    SetParticipantId,
+}
+
+#[derive(Clone, Debug)]
+struct InputModalState {
+    open: bool,
+    title: String,
+    label: String,
+    hint: String,
+    confirm_label: String,
+    input: String,
+    action: Option<ModalAction>,
+}
+
+impl Default for InputModalState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            title: "Input".to_string(),
+            label: "Value".to_string(),
+            hint: "Type value".to_string(),
+            confirm_label: "OK".to_string(),
+            input: String::new(),
+            action: None,
+        }
+    }
+}
 
 pub(crate) fn selected_room_id() -> Option<String> {
     CHAT.get()
@@ -271,15 +334,41 @@ fn render_chat_rectangle(
             ui.set_min_height(row_height);
             ui.set_height(row_height);
             ui.set_width((ui.available_width() - 40.0).max(0.0));
+            let normal_widget_height = ui.spacing().interact_size.y;
+            let input_row_height = (normal_widget_height - 2.0).max(20.0);
+            let top_row_height = normal_widget_height;
+            let top_gap = 6.0;
+            let bottom_gap = 6.0;
+            let bar_fill = ui.visuals().faint_bg_color;
+            let bar_stroke = egui::Stroke::new(1.0, ui.visuals().strong_text_color());
+
             egui::Frame::new()
                 .inner_margin(egui::Margin::same(4))
                 .show(ui, |ui| {
-                    let input_row_height = 28.0;
-                    let bottom_gap = 6.0;
+                    egui::Frame::new()
+                        .fill(bar_fill)
+                        .stroke(bar_stroke)
+                        .inner_margin(egui::Margin::symmetric(8, 0))
+                        .show(ui, |ui| {
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(ui.available_width(), top_row_height),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.label(egui::RichText::new("Top Actions").strong());
+                                },
+                            );
+                        });
+
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(top_gap);
+
                     // Reserve space for the separator and input footer so the message list
-                    // cannot push the panel past its bottom edge.
-                    let footer_height = input_row_height + bottom_gap + 18.0;
-                    let messages_height = (ui.available_height() - footer_height).max(0.0);
+                    // cannot push the panel past its bottom edge. Also reserve space for
+                    // the fixed top action bar.
+                    let footer_height = input_row_height + bottom_gap;
+                    let top_bar_height = top_row_height + top_gap + 8.0;
+                    let messages_height = (ui.available_height() - footer_height - top_bar_height).max(0.0);
                     ui.allocate_ui_with_layout(
                         egui::vec2(ui.available_width(), messages_height),
                         egui::Layout::top_down(egui::Align::Min),
@@ -381,12 +470,18 @@ fn render_chat_rectangle(
             ui.add_enabled_ui(human_to_agent_mode, |ui| {
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
-                    let response = ui.add(
+                    let input_width = (ui.available_width() - 72.0).max(220.0);
+                    let response = ui.add_sized(
+                        egui::vec2(input_width, input_row_height),
                         egui::TextEdit::singleline(&mut chat.input_text)
-                            .hint_text("Type a message")
-                            .desired_width((ui.available_width() - 72.0).max(220.0)),
+                            .hint_text("Type a message"),
                     );
-                    let send_clicked = ui.add(egui::Button::new("Send")).clicked()
+                    let send_clicked = ui
+                        .add_sized(
+                            egui::vec2(52.0, input_row_height),
+                            egui::Button::new("Send"),
+                        )
+                        .clicked()
                         || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
 
                     if send_clicked && !chat.input_text.trim().is_empty() {
@@ -499,12 +594,11 @@ fn render_right_bar(
             ui.set_height(row_height);
             ui.add_space(-1.0);
             ui.vertical(|ui| {
-                let experiment_name =
-                    EXPERIMENT_NAME.get_or_init(|| Mutex::new("Exp001".to_string()));
-                let experiment_csv_name =
-                    EXPERIMENT_CSV_NAME.get_or_init(|| Mutex::new("Exp001.csv".to_string()));
-                let final_participant_question = FINAL_PARTICIPANT_QUESTION
-                    .get_or_init(|| Mutex::new(String::new()));
+                let exp_design = HUMAI_EXPDESIGN.get_or_init(|| Mutex::new(HumaiExpDesign::default()));
+                let exp_snapshot = exp_design
+                    .lock()
+                    .map(|v| v.clone())
+                    .unwrap_or_default();
                 let selected_room_id = chat.selected_room.as_deref().unwrap_or("(none)");
                 let selected_room_name = chat
                     .selected_room
@@ -533,8 +627,8 @@ fn render_right_bar(
                 let columns_height = (ui.available_height() - 20.0).max(0.0);
 
                 let total_width = ui.available_width();
-                let left_width = (total_width * 0.3).max(0.0);
-                let right_width = (total_width * 0.61).max(0.0);
+                let left_width = 120.0;
+                let right_width = 250.0;
 
                 ui.allocate_ui_with_layout(
                     egui::vec2(total_width, columns_height),
@@ -557,90 +651,34 @@ fn render_right_bar(
                                         ui.set_max_width(left_width);
                                         ui.set_min_height(columns_height);
                                         ui.set_height(columns_height);
+                                        let label_wrap_width = (left_width - 16.0).max(80.0);
+                                        let left_row = |ui: &mut egui::Ui, text: String| {
+                                            ui.allocate_ui_with_layout(
+                                                egui::vec2(label_wrap_width, 0.0),
+                                                egui::Layout::left_to_right(egui::Align::Min),
+                                                |ui| {
+                                                    ui.add(egui::Label::new(text).wrap());
+                                                },
+                                            );
+                                        };
 
-                                        let csv_label = experiment_csv_name
-                                            .lock()
-                                            .map(|v| v.clone())
-                                            .unwrap_or_else(|_| "Exp001.csv".to_string());
-                                        ui.horizontal(|ui| {
-                                            ui.label("CSV:");
-                                            ui.label(csv_label);
-                                        });
-
+                                        left_row(ui, format!("CSV: {}", exp_snapshot.csv_name));
                                         ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Exp. Design");
-                                        });
-
+                                        left_row(ui, "Exp. Design".to_string());
                                         ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("");
-                                        });
-
+                                        left_row(ui, format!("Groups: {}", exp_snapshot.groups));
                                         ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Groups: 1");
-                                        });
-
+                                        left_row(ui, format!("Conditions: {}", exp_snapshot.conditions));
                                         ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("");
-                                        });
-
+                                        left_row(ui, format!("Blocks: {}", exp_snapshot.blocks));
                                         ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Conditions: 2");
-                                        });
-
+                                        left_row(ui, format!("Trials: {}", exp_snapshot.trials));
                                         ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("");
-                                        });
-
+                                        left_row(ui, format!("Trial (s): {}", exp_snapshot.trial_seconds));
                                         ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Blocks: 2");
-                                        });
+                                        left_row(ui, format!("Topic: {}", exp_snapshot.topic));
 
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("");
-                                        });
 
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Trials: 2");
-                                        });
-
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("");
-                                        });
-
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Trial (s): 3000");
-                                        });
-
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("");
-                                        });
-
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Timer: Yes");
-                                        });
-
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("");
-                                        });
-
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Question: Yes");
-                                        });
 
                                     });
                             },
@@ -668,16 +706,13 @@ fn render_right_bar(
 
                                         ui.horizontal(|ui| {
                                             ui.label("Name:");
-                                            if let Ok(mut name) = experiment_name.lock() {
+                                            if let Ok(mut design) = exp_design.lock() {
                                                 let response = ui.add(
-                                                    egui::TextEdit::singleline(&mut *name)
+                                                    egui::TextEdit::singleline(&mut design.name)
                                                         .desired_width(140.0),
                                                 );
                                                 if response.changed() {
-                                                    let csv_name = format!("{}.csv", name.trim());
-                                                    if let Ok(mut csv) = experiment_csv_name.lock() {
-                                                        *csv = csv_name;
-                                                    }
+                                                    design.sync_csv_name_from_name();
                                                 }
                                             }
                                         });
@@ -713,7 +748,7 @@ fn render_right_bar(
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
                                             let _ = ui.button("No Trials");
-                                            let _ = ui.button("2");
+                                            let _ = ui.button(exp_snapshot.blocks.to_string());
                                         });
 
                                         ui.add_space(4.0);
@@ -724,7 +759,7 @@ fn render_right_bar(
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
                                             let _ = ui.button("No Trials");
-                                            let _ = ui.button("2");
+                                            let _ = ui.button(exp_snapshot.trials.to_string());
                                         });
 
                                         ui.add_space(4.0);
@@ -735,7 +770,7 @@ fn render_right_bar(
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
                                             let _ = ui.button("Seconds");
-                                            let _ = ui.button("180");
+                                            let _ = ui.button(exp_snapshot.trial_seconds.to_string());
                                         });
 
                                         ui.add_space(4.0);
@@ -745,9 +780,9 @@ fn render_right_bar(
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            if let Ok(mut question) = final_participant_question.lock() {
+                                            if let Ok(mut design) = exp_design.lock() {
                                                 ui.add(
-                                                    egui::TextEdit::singleline(&mut *question)
+                                                    egui::TextEdit::singleline(&mut design.question)
                                                         .hint_text("Type final question")
                                                         .desired_width((right_width - 24.0).max(120.0)),
                                                 );
@@ -756,15 +791,22 @@ fn render_right_bar(
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            ui.label("Timer​");
+                                            ui.label("Topic​");
                                         });
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            let _ = ui.button("ON");
+                                            if let Ok(mut design) = exp_design.lock() {
+                                                ui.add(
+                                                    egui::TextEdit::singleline(&mut design.topic)
+                                                        .desired_width((right_width - 24.0).max(120.0)),
+                                                );
+                                            }
                                         });
 
-                                        ui.add_space(50.0);
+                                        ui.add_space(8.0);
+                                        ui.separator();
+                                        ui.add_space(8.0);
                                         ui.horizontal(|ui| {
                                             let _ = ui.button("Reset");
                                             if ui.button("Submit").clicked() {
@@ -773,8 +815,6 @@ fn render_right_bar(
                                             let _ = ui.button("Download");
                                             let _ = ui.button("Upload");
                                         });
-
-                                        
                                     });
                             },
                         );
@@ -783,35 +823,47 @@ fn render_right_bar(
                 
             });
         });
-
     render_participant_id_modal(ui.ctx());
 }
 
 fn open_participant_id_modal() {
-    let participant_id = PARTICIPANT_ID
-        .get_or_init(|| Mutex::new(String::new()))
+    let participant_id = HUMAI_EXPDESIGN
+        .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
         .lock()
-        .map(|value| value.clone())
+        .map(|design| design.participant_id.clone())
         .unwrap_or_default();
 
-    if let Ok(mut input) = PARTICIPANT_ID_MODAL_INPUT
-        .get_or_init(|| Mutex::new(String::new()))
+    if let Ok(mut modal) = GLOBAL_INPUT_MODAL
+        .get_or_init(|| Mutex::new(InputModalState::default()))
         .lock()
     {
-        *input = participant_id;
-    }
-
-    if let Ok(mut open) = PARTICIPANT_ID_MODAL_OPEN.get_or_init(|| Mutex::new(false)).lock() {
-        *open = true;
+        modal.open = true;
+        modal.title = "Participant ID".to_string();
+        modal.label = "Participant ID".to_string();
+        modal.hint = "Type participant ID".to_string();
+        modal.confirm_label = "OK".to_string();
+        modal.input = participant_id;
+        modal.action = Some(ModalAction::SetParticipantId);
     }
 }
 
 fn render_participant_id_modal(ctx: &egui::Context) {
-    let mut is_open = PARTICIPANT_ID_MODAL_OPEN
-        .get_or_init(|| Mutex::new(false))
-        .lock()
-        .map(|value| *value)
-        .unwrap_or(false);
+    let (mut is_open, title, label, hint, confirm_label) = {
+        let modal_guard = GLOBAL_INPUT_MODAL
+            .get_or_init(|| Mutex::new(InputModalState::default()))
+            .lock();
+        let Ok(modal) = modal_guard else {
+            return;
+        };
+
+        (
+            modal.open,
+            modal.title.clone(),
+            modal.label.clone(),
+            modal.hint.clone(),
+            modal.confirm_label.clone(),
+        )
+    };
 
     if !is_open {
         return;
@@ -821,7 +873,7 @@ fn render_participant_id_modal(ctx: &egui::Context) {
     let modal_size = egui::vec2((rect.width() * 0.6).max(320.0), (rect.height() * 0.6).max(220.0));
     let mut close_modal = false;
 
-    egui::Window::new("Participant ID")
+    egui::Window::new(title)
         .collapsible(false)
         .resizable(false)
         .movable(false)
@@ -831,31 +883,38 @@ fn render_participant_id_modal(ctx: &egui::Context) {
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(8.0);
-                ui.label("Participant ID");
+                ui.label(label.clone());
                 ui.add_space(8.0);
 
-                if let Ok(mut input) = PARTICIPANT_ID_MODAL_INPUT
-                    .get_or_init(|| Mutex::new(String::new()))
+                if let Ok(mut modal) = GLOBAL_INPUT_MODAL
+                    .get_or_init(|| Mutex::new(InputModalState::default()))
                     .lock()
                 {
                     let response = ui.add(
-                        egui::TextEdit::singleline(&mut *input)
-                            .hint_text("Type participant ID")
+                        egui::TextEdit::singleline(&mut modal.input)
+                            .hint_text(hint.clone())
                             .desired_width((modal_size.x * 0.6).max(220.0)),
                     );
 
                     ui.add_space(16.0);
-                    let ok_clicked = ui.button("OK").clicked()
+                    let ok_clicked = ui.button(confirm_label.clone()).clicked()
                         || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
 
                     if ok_clicked {
-                        let value = input.trim().to_string();
-                        if let Ok(mut global_id) = PARTICIPANT_ID
-                            .get_or_init(|| Mutex::new(String::new()))
-                            .lock()
-                        {
-                            *global_id = value;
+                        let value = modal.input.trim().to_string();
+                        match modal.action.clone() {
+                            Some(ModalAction::SetParticipantId) => {
+                                if let Ok(mut design) = HUMAI_EXPDESIGN
+                                    .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
+                                    .lock()
+                                {
+                                    design.participant_id = value;
+                                }
+                            }
+                            None => {}
                         }
+                        modal.open = false;
+                        modal.action = None;
                         close_modal = true;
                     }
                 }
@@ -866,7 +925,13 @@ fn render_participant_id_modal(ctx: &egui::Context) {
         is_open = false;
     }
 
-    if let Ok(mut open) = PARTICIPANT_ID_MODAL_OPEN.get_or_init(|| Mutex::new(false)).lock() {
-        *open = is_open;
+    if let Ok(mut modal) = GLOBAL_INPUT_MODAL
+        .get_or_init(|| Mutex::new(InputModalState::default()))
+        .lock()
+    {
+        modal.open = is_open;
+        if !is_open {
+            modal.action = None;
+        }
     }
 }

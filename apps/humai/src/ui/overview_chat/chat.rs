@@ -138,17 +138,29 @@ impl ChatExample {
                 egui::Frame::new()
                     .inner_margin(egui::Margin::symmetric(4, 0))
                     .show(ui, |ui| {
+                        let value_row_width = ui.available_width().max(0.0);
+
                         ui.label(egui::RichText::new("Main Timer").strong().size(16.0));
-                        Self::render_full_width_value_row(ui, "00:00:00");
+
+                        ui.add_space(6.0);
+
+                        
+                        Self::render_full_width_value_row(ui, "00:00:00", value_row_width);
 
                         Self::section_separator(ui);
 
                         ui.label(egui::RichText::new("Participant ID").strong().size(16.0));
-                        let participant_id = super::panel::PARTICIPANT_ID
-                            .get_or_init(|| std::sync::Mutex::new(String::new()))
+
+                        ui.add_space(6.0);
+
+
+                        let participant_id = super::panel::HUMAI_EXPDESIGN
+                            .get_or_init(|| {
+                                std::sync::Mutex::new(super::panel::HumaiExpDesign::default())
+                            })
                             .lock()
-                            .map(|value| {
-                                let trimmed = value.trim();
+                            .map(|design| {
+                                let trimmed = design.participant_id.trim();
                                 if trimmed.is_empty() {
                                     "NONE".to_string()
                                 } else {
@@ -156,11 +168,13 @@ impl ChatExample {
                                 }
                             })
                             .unwrap_or_else(|_| "NONE".to_string());
-                        Self::render_full_width_value_row(ui, &participant_id);
+                        Self::render_full_width_value_row(ui, &participant_id, value_row_width);
 
                         Self::section_separator(ui);
 
                         ui.label(egui::RichText::new("Room Settings").strong().size(16.0));
+
+                        ui.add_space(6.0);
 
                         if ui.button("New Room").clicked() {
                             let name = format!("Room {}", self.rooms.len() + 1);
@@ -249,8 +263,7 @@ impl ChatExample {
         ui.spacing_mut().item_spacing.y = 2.0;
     }
 
-    fn render_full_width_value_row(ui: &mut Ui, value: &str) {
-        let width = ui.available_width().max(0.0);
+    fn render_full_width_value_row(ui: &mut Ui, value: &str, width: f32) {
         let height = ui.spacing().interact_size.y;
         egui::Frame::new()
             .fill(ui.visuals().widgets.inactive.bg_fill)
@@ -478,113 +491,4 @@ impl ChatExample {
         self.message_timestamps = vec![t];
     }
 
-    pub fn ui(&mut self, ui: &mut Ui) {
-        for item in self.inbox.drain() {
-            let ts = Self::display_time_for_message(&item);
-            self.message_timestamps.push(ts);
-            self.messages.push(item);
-        }
-
-        egui::TopBottomPanel::top("sidebar_toggle").show_inside(ui, |ui| {
-            if ui
-                .button(if self.sidebar_open { "Hide Rooms" } else { "Show Rooms" })
-                .clicked()
-            {
-                self.sidebar_open = !self.sidebar_open;
-            }
-        });
-
-        // Sidebar visibility is explicitly user-controlled by the toggle button.
-        if self.sidebar_open {
-            self.sidebar_ui(ui);
-        }
-
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.vertical(|ui| {
-                let list_height = (ui.available_height() - 72.0).max(0.0);
-                ScrollArea::vertical()
-                    .id_salt("overview_messages_scroll")
-                    .stick_to_bottom(true)
-                    .max_height(list_height)
-                    .show(ui, |ui| {
-                        for (idx, item) in self.messages.iter().enumerate() {
-                            let timestamp = self
-                                .message_timestamps
-                                .get(idx)
-                                .map(|s| s.as_str())
-                                .unwrap_or("--:--:--");
-                            ui.horizontal(|ui| {
-                                ui.label(timestamp);
-                                ui.separator();
-                                ui.vertical(|ui| {
-                                    if let Some(from) = &item.from {
-                                        ui.label(egui::RichText::new(from).strong());
-                                    }
-                                    ui.label(&item.content);
-                                });
-                            });
-                        }
-
-                        if *self.waiting_for_response.lock().unwrap() {
-                            ui.horizontal(|ui| {
-                                ui.spinner();
-                                ui.label("Waiting for response...");
-                            });
-                        }
-                    });
-
-                ui.add_enabled_ui(self.main_input_enabled, |ui| {
-                    ui.horizontal(|ui| {
-                        let response = ui.add_sized(
-                            Vec2::new(400.0, 26.0),
-                            egui::TextEdit::singleline(&mut self.input_text).hint_text("Type a message"),
-                        );
-                        let send_button = ui.add_sized(Vec2::new(52.0, 26.0), egui::Button::new("Send"));
-                        let send_clicked = send_button.clicked()
-                            || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
-                        if send_clicked && !self.input_text.trim().is_empty() {
-                            let message_text = self.input_text.trim().to_string();
-                            self.input_text.clear();
-
-                            let user_message = ChatMessage {
-                                content: message_text.clone(),
-                                from: Some("Human".to_string()),
-                                correlation: None,
-                                source: MessageSource::Human,
-                                api_auto_respond: false,
-                                assistant_generation: None,
-                            };
-                            let ts = Self::current_timestamp_string();
-                            let persisted = user_message.clone();
-                            self.messages.push(user_message);
-                            self.message_timestamps.push(ts.clone());
-                            self.commit_message(&persisted, &ts);
-
-                            if let Some(room_id) = &self.selected_room
-                                && let Ok(store) = super::store::Store::open("metrics/overview_chat.sqlite")
-                            {
-                                let _ = store.append_message(room_id, &persisted, &ts);
-                            }
-
-                            if let Some(handler) = &self.message_handler {
-                                handler(message_text);
-                            } else {
-                                let tx = self.inbox.sender();
-                                let bot_message = ChatMessage {
-                                    content: "Please select a model".to_string(),
-                                    from: Some("System".to_string()),
-                                    correlation: None,
-                                    source: MessageSource::System,
-                                    api_auto_respond: false,
-                                    assistant_generation: None,
-                                };
-                                let _ = tx.send(bot_message);
-                            }
-                        }
-                    });
-
-                });
-            });
-        });
-    }
 }
