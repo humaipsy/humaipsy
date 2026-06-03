@@ -144,8 +144,8 @@ impl ChatExample {
 
                         ui.add_space(6.0);
 
-                        
-                        Self::render_full_width_value_row(ui, "00:00:00", value_row_width);
+                        let timer_value = super::panel::main_timer_display();
+                        Self::render_full_width_value_row(ui, &timer_value, value_row_width);
 
                         Self::section_separator(ui);
 

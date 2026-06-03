@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use eframe::egui;
+use egui_phosphor::regular;
 
 use crate::agents::{Arpsci, GlobalChatMode};
 
@@ -16,8 +17,337 @@ static CHAT: OnceLock<Mutex<ChatExample>> = OnceLock::new();
 static ACTIVE_ROOM_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static ROOM_ORDER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 pub(crate) static HUMAI_EXPDESIGN: OnceLock<Mutex<HumaiExpDesign>> = OnceLock::new();
+static MAIN_TIMER: OnceLock<Mutex<MainTimerState>> = OnceLock::new();
+static EXPERIMENT_SESSION: OnceLock<Mutex<ExperimentSessionState>> = OnceLock::new();
 
 static GLOBAL_INPUT_MODAL: OnceLock<Mutex<InputModalState>> = OnceLock::new();
+
+#[derive(Clone, Debug)]
+struct MainTimerState {
+    running: bool,
+    started_at: Option<Instant>,
+    accumulated: Duration,
+}
+
+#[derive(Clone, Debug)]
+struct ExperimentSessionState {
+    configured: bool,
+    running: bool,
+    experiment_id: Option<String>,
+    run_id: Option<String>,
+}
+
+impl Default for ExperimentSessionState {
+    fn default() -> Self {
+        Self {
+            configured: false,
+            running: false,
+            experiment_id: None,
+            run_id: None,
+        }
+    }
+}
+
+impl Default for MainTimerState {
+    fn default() -> Self {
+        Self {
+            running: false,
+            started_at: None,
+            accumulated: Duration::ZERO,
+        }
+    }
+}
+
+impl MainTimerState {
+    fn start(&mut self) {
+        if self.running {
+            return;
+        }
+        self.running = true;
+        self.started_at = Some(Instant::now());
+    }
+
+    fn pause(&mut self) {
+        if !self.running {
+            return;
+        }
+        if let Some(started_at) = self.started_at {
+            self.accumulated = self.accumulated.saturating_add(started_at.elapsed());
+        }
+        self.running = false;
+        self.started_at = None;
+    }
+
+    fn stop_and_reset(&mut self) {
+        self.running = false;
+        self.started_at = None;
+        self.accumulated = Duration::ZERO;
+    }
+
+    fn elapsed(&self) -> Duration {
+        if self.running {
+            if let Some(started_at) = self.started_at {
+                return self.accumulated.saturating_add(started_at.elapsed());
+            }
+        }
+        self.accumulated
+    }
+}
+
+fn format_timer_hms(elapsed: Duration) -> String {
+    let total_secs = elapsed.as_secs();
+    let hours = total_secs / 3_600;
+    let minutes = (total_secs % 3_600) / 60;
+    let seconds = total_secs % 60;
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
+pub(crate) fn main_timer_display() -> String {
+    let elapsed = MAIN_TIMER
+        .get_or_init(|| Mutex::new(MainTimerState::default()))
+        .lock()
+        .map(|timer| timer.elapsed())
+        .unwrap_or(Duration::ZERO);
+    format_timer_hms(elapsed)
+}
+
+pub(crate) fn main_timer_is_running() -> bool {
+    MAIN_TIMER
+        .get_or_init(|| Mutex::new(MainTimerState::default()))
+        .lock()
+        .map(|timer| timer.running)
+        .unwrap_or(false)
+}
+
+fn start_main_timer() {
+    if let Ok(mut timer) = MAIN_TIMER
+        .get_or_init(|| Mutex::new(MainTimerState::default()))
+        .lock()
+    {
+        timer.start();
+    }
+}
+
+fn stop_and_reset_main_timer() {
+    if let Ok(mut timer) = MAIN_TIMER
+        .get_or_init(|| Mutex::new(MainTimerState::default()))
+        .lock()
+    {
+        timer.stop_and_reset();
+    }
+}
+
+fn pause_main_timer() {
+    if let Ok(mut timer) = MAIN_TIMER
+        .get_or_init(|| Mutex::new(MainTimerState::default()))
+        .lock()
+    {
+        timer.pause();
+    }
+}
+
+fn set_experiment_running(is_running: bool) {
+    if let Ok(mut session) = EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+    {
+        session.running = is_running;
+    }
+}
+
+fn mark_experiment_configured() {
+    if let Ok(mut session) = EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+    {
+        session.configured = true;
+    }
+}
+
+fn append_message_to_chat_and_store(
+    chat: &mut ChatExample,
+    store: &Store,
+    message: ChatMessage,
+) {
+    let ts = ChatExample::display_time_for_message(&message);
+    chat.messages.push(message.clone());
+    chat.message_timestamps.push(ts.clone());
+    if let Some(room_id) = &chat.selected_room {
+        let _ = store.append_message(room_id, &message, &ts);
+    }
+}
+
+fn spawn_ollama_opening_question(
+    app: &Arpsci,
+    chat: &ChatExample,
+    topic: String,
+    participant_id: String,
+    model: String,
+) {
+    let tx = chat.inbox.sender();
+    let waiting = chat.waiting_for_response().clone();
+    let selected_room = chat.selected_room.clone();
+    let store_path = PathBuf::from("metrics/overview_chat.sqlite");
+
+    if let Ok(mut flag) = waiting.lock() {
+        *flag = true;
+    }
+
+    app.rt_handle.spawn(async move {
+        let system_prompt = crate::ui::overview_chat::ollama::OllamaMessage {
+            role: "system".to_string(),
+            content: "You are an assistant facilitator for a human experiment. Ask exactly one concise, neutral opening question for the participant to answer. Return only the question text.".to_string(),
+        };
+        let user_prompt = crate::ui::overview_chat::ollama::OllamaMessage {
+            role: "user".to_string(),
+            content: format!(
+                "Participant ID: {participant_id}\nTopic: {topic}\nGenerate the first question now."
+            ),
+        };
+        let request = vec![system_prompt, user_prompt];
+
+        let out = crate::ui::overview_chat::ollama::chat(
+            &model,
+            &request,
+            crate::ui::overview_chat::ollama::OllamaChatOptions::default(),
+        )
+        .await;
+
+        let reply = match out {
+            Ok(content) => ChatMessage {
+                content: content.trim_end().to_string(),
+                from: Some("Assistant".to_string()),
+                correlation: None,
+                source: MessageSource::Api,
+                api_auto_respond: false,
+                assistant_generation: None,
+            },
+            Err(e) => ChatMessage {
+                content: format!("Ollama error while generating opening question: {e}"),
+                from: Some("System".to_string()),
+                correlation: None,
+                source: MessageSource::System,
+                api_auto_respond: false,
+                assistant_generation: None,
+            },
+        };
+
+        if let Some(room_id) = selected_room
+            && let Ok(store) = super::store::Store::open(store_path)
+        {
+            let ts = ChatExample::display_time_for_message(&reply);
+            let _ = store.append_message(&room_id, &reply, &ts);
+        }
+        let _ = tx.send(reply);
+        if let Ok(mut flag) = waiting.lock() {
+            *flag = false;
+        }
+    });
+}
+
+fn start_experiment_from_play(app: &Arpsci, store: &Store, chat: &mut ChatExample) {
+    let design = HUMAI_EXPDESIGN
+        .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
+        .lock()
+        .map(|design| design.clone())
+        .unwrap_or_default();
+
+    let mut session = EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+        .ok();
+
+    if let Some(state) = session.as_deref_mut()
+        && state.running
+    {
+        return;
+    }
+
+    if design.participant_id.trim().is_empty() {
+        append_message_to_chat_and_store(
+            chat,
+            store,
+            ChatMessage {
+                content: "Submit experiment settings and provide a Participant ID before starting."
+                    .to_string(),
+                from: Some("System".to_string()),
+                correlation: None,
+                source: MessageSource::System,
+                api_auto_respond: false,
+                assistant_generation: None,
+            },
+        );
+        return;
+    }
+
+    if design.topic.trim().is_empty() {
+        append_message_to_chat_and_store(
+            chat,
+            store,
+            ChatMessage {
+                content: "Please set a topic before starting the experiment.".to_string(),
+                from: Some("System".to_string()),
+                correlation: None,
+                source: MessageSource::System,
+                api_auto_respond: false,
+                assistant_generation: None,
+            },
+        );
+        return;
+    }
+
+    let model = app.selected_ollama_model.trim().to_string();
+    if model.is_empty() {
+        append_message_to_chat_and_store(
+            chat,
+            store,
+            ChatMessage {
+                content: "Please select a global Ollama model in Settings before starting."
+                    .to_string(),
+                from: Some("System".to_string()),
+                correlation: None,
+                source: MessageSource::System,
+                api_auto_respond: false,
+                assistant_generation: None,
+            },
+        );
+        return;
+    }
+
+    start_main_timer();
+
+    let topic = design.topic.trim().to_string();
+    let participant_id = design.participant_id.trim().to_string();
+    let experiment_id = crate::run::manifest::derive_experiment_id(&format!(
+        "{}|{}|{}",
+        design.name.trim(),
+        participant_id,
+        topic
+    ));
+    let run_id = crate::run::manifest::new_run_id();
+
+    if let Some(state) = session.as_deref_mut() {
+        state.running = true;
+        state.configured = true;
+        state.experiment_id = Some(experiment_id);
+        state.run_id = Some(run_id);
+    }
+
+    append_message_to_chat_and_store(
+        chat,
+        store,
+        ChatMessage {
+            content: "Experiment Started".to_string(),
+            from: Some("System".to_string()),
+            correlation: None,
+            source: MessageSource::System,
+            api_auto_respond: false,
+            assistant_generation: None,
+        },
+    );
+
+    spawn_ollama_opening_question(app, chat, topic, participant_id, model);
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct HumaiExpDesign {
@@ -169,7 +499,7 @@ pub(crate) fn render_overview_panel(app: &mut Arpsci, ui: &mut egui::Ui) {
         chat.selected_room = rooms.first().map(|room| room.id.clone());
     }
 
-    if graph_running {
+    if graph_running || main_timer_is_running() {
         ui.ctx().request_repaint_after(Duration::from_millis(33));
     }
 
@@ -354,7 +684,48 @@ fn render_chat_rectangle(
                                 egui::vec2(ui.available_width(), top_row_height),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
-                                    ui.label(egui::RichText::new("Top Actions").strong());
+                                    ui.label(egui::RichText::new("Experiment").strong());
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        let stop_btn = egui::Button::new(
+                                            egui::RichText::new(regular::X)
+                                                .line_height(Some(ui.text_style_height(&egui::TextStyle::Body))),
+                                        )
+                                        .small();
+                                        if ui
+                                            .add(stop_btn)
+                                            .on_hover_text("Stop timer and reset to 00:00:00")
+                                            .clicked()
+                                        {
+                                            stop_and_reset_main_timer();
+                                            set_experiment_running(false);
+                                        }
+
+                                        let pause_btn = egui::Button::new(
+                                            egui::RichText::new(regular::PAUSE)
+                                                .line_height(Some(ui.text_style_height(&egui::TextStyle::Body))),
+                                        )
+                                        .small();
+                                        if ui
+                                            .add_enabled(main_timer_is_running(), pause_btn)
+                                            .on_hover_text("Pause timer")
+                                            .clicked()
+                                        {
+                                            pause_main_timer();
+                                        }
+
+                                        let play_btn = egui::Button::new(
+                                            egui::RichText::new(regular::PLAY)
+                                                .line_height(Some(ui.text_style_height(&egui::TextStyle::Body))),
+                                        )
+                                        .small();
+                                        if ui
+                                            .add_enabled(!main_timer_is_running(), play_btn)
+                                            .on_hover_text("Start timer")
+                                            .clicked()
+                                        {
+                                            start_experiment_from_play(app, store, chat);
+                                        }
+                                    });
                                 },
                             );
                         });
@@ -910,6 +1281,7 @@ fn render_participant_id_modal(ctx: &egui::Context) {
                                 {
                                     design.participant_id = value;
                                 }
+                                mark_experiment_configured();
                             }
                             None => {}
                         }
