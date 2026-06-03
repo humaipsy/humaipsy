@@ -2,7 +2,7 @@
 
 use crate::app_state::AppState;
 use crate::metrics::MetricsConfig;
-use crate::web::HttpPolicy;
+use crate::ollama::HttpPolicy;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::runtime::Handle;
@@ -28,10 +28,11 @@ pub enum MainPanelTab {
     Settings,
 }
 
-pub struct Arpsci {
+pub struct Humai {
     pub(crate) rt_handle: Handle,
     pub(crate) app_state: Arc<AppState>,
     pub(crate) selected_ollama_model: String,
+    pub(crate) assistant_prompt: String,
     pub(crate) conversation_history_size: usize,
     pub(crate) air_gap_enabled: bool,
     pub(crate) allow_local_ollama: bool,
@@ -47,10 +48,10 @@ pub struct Arpsci {
     pub(crate) catppuccin_theme: CatppuccinTheme,
 }
 
-impl Arpsci {
+impl Humai {
     pub fn new(rt_handle: Handle) -> Self {
-        let http_policy = crate::web::HttpPolicy::from_env();
-        crate::web::set_policy(http_policy);
+        let http_policy = crate::ollama::HttpPolicy::from_env();
+        crate::ollama::set_http_policy(http_policy);
         let metrics_config = MetricsConfig::from_env();
         let app_state = Arc::new(AppState::new(metrics_config.clone()));
 
@@ -58,6 +59,9 @@ impl Arpsci {
             rt_handle,
             app_state,
             selected_ollama_model: std::env::var("OLLAMA_MODEL").unwrap_or_default(),
+            assistant_prompt: std::env::var("HUMAI_ASSISTANT_PROMPT").unwrap_or_else(|_| {
+                "You are HumaiAgent, the experiment assistant for human-to-agent conversations. Be clear, neutral, and helpful. Keep responses concise and actionable when possible.".to_string()
+            }),
             conversation_history_size: 5,
             air_gap_enabled: http_policy.air_gap_enabled,
             allow_local_ollama: http_policy.allow_local_ollama,
@@ -72,7 +76,7 @@ impl Arpsci {
     }
 
     pub(crate) fn sync_http_policy(&self) {
-        crate::web::set_policy(HttpPolicy {
+        crate::ollama::set_http_policy(HttpPolicy {
             air_gap_enabled: self.air_gap_enabled,
             allow_local_ollama: self.allow_local_ollama,
         });

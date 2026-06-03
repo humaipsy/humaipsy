@@ -4,13 +4,13 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
 use egui_phosphor::regular;
 
-use crate::agents::{Arpsci, GlobalChatMode};
+use crate::app_model::{GlobalChatMode, Humai};
 
 use super::chat::{ChatExample, ChatMessage, Room};
 use super::incoming::MessageSource;
@@ -20,18 +20,10 @@ static CHAT: OnceLock<Mutex<ChatExample>> = OnceLock::new();
 static ACTIVE_ROOM_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static ROOM_ORDER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 pub(crate) static HUMAI_EXPDESIGN: OnceLock<Mutex<HumaiExpDesign>> = OnceLock::new();
-static MAIN_TIMER: OnceLock<Mutex<MainTimerState>> = OnceLock::new();
 static EXPERIMENT_SESSION: OnceLock<Mutex<ExperimentSessionState>> = OnceLock::new();
 static EXP_RUN_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 static GLOBAL_INPUT_MODAL: OnceLock<Mutex<InputModalState>> = OnceLock::new();
-
-#[derive(Clone, Debug)]
-struct MainTimerState {
-    running: bool,
-    started_at: Option<Instant>,
-    accumulated: Duration,
-}
 
 #[derive(Clone, Debug)]
 struct ExperimentSessionState {
@@ -49,104 +41,6 @@ impl Default for ExperimentSessionState {
             experiment_id: None,
             run_id: None,
         }
-    }
-}
-
-impl Default for MainTimerState {
-    fn default() -> Self {
-        Self {
-            running: false,
-            started_at: None,
-            accumulated: Duration::ZERO,
-        }
-    }
-}
-
-impl MainTimerState {
-    fn start(&mut self) {
-        if self.running {
-            return;
-        }
-        self.running = true;
-        self.started_at = Some(Instant::now());
-    }
-
-    fn pause(&mut self) {
-        if !self.running {
-            return;
-        }
-        if let Some(started_at) = self.started_at {
-            self.accumulated = self.accumulated.saturating_add(started_at.elapsed());
-        }
-        self.running = false;
-        self.started_at = None;
-    }
-
-    fn stop_and_reset(&mut self) {
-        self.running = false;
-        self.started_at = None;
-        self.accumulated = Duration::ZERO;
-    }
-
-    fn elapsed(&self) -> Duration {
-        if self.running {
-            if let Some(started_at) = self.started_at {
-                return self.accumulated.saturating_add(started_at.elapsed());
-            }
-        }
-        self.accumulated
-    }
-}
-
-fn format_timer_hms(elapsed: Duration) -> String {
-    let total_secs = elapsed.as_secs();
-    let hours = total_secs / 3_600;
-    let minutes = (total_secs % 3_600) / 60;
-    let seconds = total_secs % 60;
-    format!("{hours:02}:{minutes:02}:{seconds:02}")
-}
-
-pub(crate) fn main_timer_display() -> String {
-    let elapsed = MAIN_TIMER
-        .get_or_init(|| Mutex::new(MainTimerState::default()))
-        .lock()
-        .map(|timer| timer.elapsed())
-        .unwrap_or(Duration::ZERO);
-    format_timer_hms(elapsed)
-}
-
-pub(crate) fn main_timer_is_running() -> bool {
-    MAIN_TIMER
-        .get_or_init(|| Mutex::new(MainTimerState::default()))
-        .lock()
-        .map(|timer| timer.running)
-        .unwrap_or(false)
-}
-
-fn start_main_timer() {
-    if let Ok(mut timer) = MAIN_TIMER
-        .get_or_init(|| Mutex::new(MainTimerState::default()))
-        .lock()
-    {
-        timer.start();
-    }
-}
-
-fn stop_and_reset_main_timer() {
-    if let Ok(mut timer) = MAIN_TIMER
-        .get_or_init(|| Mutex::new(MainTimerState::default()))
-        .lock()
-    {
-        timer.stop_and_reset();
-    }
-}
-
-fn pause_main_timer() {
-    if let Ok(mut timer) = MAIN_TIMER
-        .get_or_init(|| Mutex::new(MainTimerState::default()))
-        .lock()
-    {
-        timer.pause();
     }
 }
 
@@ -200,8 +94,31 @@ fn append_message_to_chat_and_store(
     }
 }
 
+fn agent_memory_from_chat(chat: &ChatExample) -> Vec<crate::agent::AgentMemoryMessage> {
+    chat.messages
+        .iter()
+        .filter_map(|msg| {
+            let role = match msg.source {
+                MessageSource::Human => crate::agent::AgentRole::User,
+                MessageSource::Api => crate::agent::AgentRole::Assistant,
+                _ => return None,
+            };
+
+            let content = msg.content.trim();
+            if content.is_empty() {
+                return None;
+            }
+
+            Some(crate::agent::AgentMemoryMessage {
+                role,
+                content: content.to_string(),
+            })
+        })
+        .collect()
+}
+
 fn spawn_ollama_opening_question(
-    app: &Arpsci,
+    app: &Humai,
     chat: &ChatExample,
     topic: String,
     participant_id: String,
@@ -211,30 +128,22 @@ fn spawn_ollama_opening_question(
     let waiting = chat.waiting_for_response().clone();
     let selected_room = chat.selected_room.clone();
     let store_path = PathBuf::from("metrics/overview_chat.sqlite");
+    let ollama_host = app.ollama_host.clone();
+    let assistant_prompt = app.assistant_prompt.clone();
+    let app_state = app.app_state.clone();
+    let history_size = app.conversation_history_size;
 
     if let Ok(mut flag) = waiting.lock() {
         *flag = true;
     }
 
     app.rt_handle.spawn(async move {
-        let system_prompt = crate::ui::overview_chat::ollama::OllamaMessage {
-            role: "system".to_string(),
-            content: "You are an assistant facilitator for a human experiment. Ask exactly one concise, neutral opening question for the participant to answer. Return only the question text.".to_string(),
-        };
-        let user_prompt = crate::ui::overview_chat::ollama::OllamaMessage {
-            role: "user".to_string(),
-            content: format!(
-                "Participant ID: {participant_id}\nTopic: {topic}\nGenerate the first question now."
-            ),
-        };
-        let request = vec![system_prompt, user_prompt];
+        let agent = crate::agent::HumaiAgent::new(ollama_host, model, assistant_prompt, app_state)
+            .with_history_size(history_size);
 
-        let out = crate::ui::overview_chat::ollama::chat(
-            &model,
-            &request,
-            crate::ui::overview_chat::ollama::OllamaChatOptions::default(),
-        )
-        .await;
+        let out = agent
+            .generate_opening_question(&participant_id, &topic)
+            .await;
 
         let reply = match out {
             Ok(content) => ChatMessage {
@@ -268,7 +177,7 @@ fn spawn_ollama_opening_question(
     });
 }
 
-fn start_experiment_from_play(app: &Arpsci, store: &Store, chat: &mut ChatExample) {
+fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample) {
     let design = HUMAI_EXPDESIGN
         .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
         .lock()
@@ -337,7 +246,7 @@ fn start_experiment_from_play(app: &Arpsci, store: &Store, chat: &mut ChatExampl
         return;
     }
 
-    start_main_timer();
+    crate::timer::start_main_timer();
 
     let topic = design.topic.trim().to_string();
     let participant_id = design.participant_id.trim().to_string();
@@ -439,13 +348,7 @@ impl Default for InputModalState {
     }
 }
 
-pub(crate) fn selected_room_id() -> Option<String> {
-    CHAT.get()
-        .and_then(|c| c.lock().ok())
-        .and_then(|c| c.selected_room.clone())
-}
-
-pub(crate) fn render_overview_panel(app: &mut Arpsci, ui: &mut egui::Ui) {
+pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
     let db_path = PathBuf::from("metrics/overview_chat.sqlite");
     let store = match Store::open(db_path) {
         Ok(store) => store,
@@ -522,7 +425,7 @@ pub(crate) fn render_overview_panel(app: &mut Arpsci, ui: &mut egui::Ui) {
         chat.selected_room = rooms.first().map(|room| room.id.clone());
     }
 
-    if graph_running || main_timer_is_running() {
+    if graph_running || crate::timer::main_timer_is_running() {
         ui.ctx().request_repaint_after(Duration::from_millis(33));
     }
 
@@ -637,7 +540,7 @@ fn persist_and_hydrate_selected_room(
 }
 
 fn render_chat_columns(
-    app: &mut Arpsci,
+    app: &mut Humai,
     ui: &mut egui::Ui,
     store: &Store,
     chat: &mut ChatExample,
@@ -668,7 +571,7 @@ fn render_chat_columns(
 }
 
 fn render_chat_rectangle(
-    app: &mut Arpsci,
+    app: &mut Humai,
     ui: &mut egui::Ui,
     store: &Store,
     chat: &mut ChatExample,
@@ -719,7 +622,7 @@ fn render_chat_rectangle(
                                             .on_hover_text("Stop timer and reset to 00:00:00")
                                             .clicked()
                                         {
-                                            stop_and_reset_main_timer();
+                                            crate::timer::stop_and_reset_main_timer();
                                             set_experiment_running(false);
                                         }
 
@@ -729,11 +632,11 @@ fn render_chat_rectangle(
                                         )
                                         .small();
                                         if ui
-                                            .add_enabled(main_timer_is_running(), pause_btn)
+                                            .add_enabled(crate::timer::main_timer_is_running(), pause_btn)
                                             .on_hover_text("Pause timer")
                                             .clicked()
                                         {
-                                            pause_main_timer();
+                                            crate::timer::pause_main_timer();
                                         }
 
                                         let play_btn = egui::Button::new(
@@ -742,7 +645,7 @@ fn render_chat_rectangle(
                                         )
                                         .small();
                                         if ui
-                                            .add_enabled(!main_timer_is_running(), play_btn)
+                                            .add_enabled(!crate::timer::main_timer_is_running(), play_btn)
                                             .on_hover_text("Start timer")
                                             .clicked()
                                         {
@@ -898,11 +801,17 @@ fn render_chat_rectangle(
                             let _ = store.append_message(room_id, &user_message, &ts);
                         }
 
+                        let memory_snapshot = agent_memory_from_chat(chat);
+
                         let tx = chat.inbox.sender();
                         let waiting = chat.waiting_for_response().clone();
                         let selected_room = chat.selected_room.clone();
                         let store_path = PathBuf::from("metrics/overview_chat.sqlite");
                         let model = app.selected_ollama_model.trim().to_string();
+                        let ollama_host = app.ollama_host.clone();
+                        let assistant_prompt = app.assistant_prompt.clone();
+                        let app_state = app.app_state.clone();
+                        let history_size = app.conversation_history_size;
                         if model.is_empty() {
                             let _ = tx.send(ChatMessage {
                                 content: "Please select a global Ollama model in Settings.".to_string(),
@@ -917,16 +826,14 @@ fn render_chat_rectangle(
                                 *flag = true;
                             }
                             app.rt_handle.spawn(async move {
-                                let request = vec![crate::ui::overview_chat::ollama::OllamaMessage {
-                                    role: "user".to_string(),
-                                    content: message_text,
-                                }];
-                                let out = crate::ui::overview_chat::ollama::chat(
-                                    &model,
-                                    &request,
-                                    crate::ui::overview_chat::ollama::OllamaChatOptions::default(),
+                                let agent = crate::agent::HumaiAgent::new(
+                                    ollama_host,
+                                    model,
+                                    assistant_prompt,
+                                    app_state,
                                 )
-                                .await;
+                                .with_history_size(history_size);
+                                let out = agent.reply_from_memory(&memory_snapshot).await;
                                 let reply = match out {
                                     Ok(content) => ChatMessage {
                                         content: content.trim_end().to_string(),

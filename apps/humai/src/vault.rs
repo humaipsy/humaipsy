@@ -13,6 +13,8 @@ use eframe::egui::{self, TextEdit};
 use hkdf::Hkdf;
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 const DEFAULT_HASH_FILE: &str = "runs/.master_hash";
 /// Development toggle: keep `false` to boot unlocked; set `true` to enforce the password gate.
@@ -57,6 +59,55 @@ pub fn hash_master_password_phc(password: &str, params: VaultKdfParams) -> anyho
         .hash_password(password.as_bytes(), &salt)
         .map_err(|e| anyhow::anyhow!("failed to hash master password: {e}"))?
         .to_string())
+}
+
+pub fn default_master_hash_file_path() -> PathBuf {
+    PathBuf::from(DEFAULT_HASH_FILE)
+}
+
+pub fn write_master_hash_file(path: impl AsRef<Path>) -> std::io::Result<()> {
+    let path = path.as_ref();
+    let params = VaultKdfParams::from_env();
+    println!(
+        "This writes a one-line Argon2id hash to {} (m={} KiB, t={}, p={}).",
+        path.display(),
+        params.memory_cost_kib,
+        params.time_cost,
+        params.parallelism,
+    );
+    if path.exists() {
+        eprint!("File already exists. Overwrite? [y/N]: ");
+        std::io::stderr().flush()?;
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        if !line.trim().eq_ignore_ascii_case("y") {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
+
+    let pw = rpassword::prompt_password("Master password: ")
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let confirm = rpassword::prompt_password("Again: ")
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    if pw != confirm {
+        eprintln!("Passwords do not match.");
+        std::process::exit(1);
+    }
+
+    let phc = hash_master_password_phc(&pw, params)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, format!("{phc}\n"))?;
+
+    println!(
+        "Wrote {} (keep runs/ out of version control; do not commit the password).",
+        path.display()
+    );
+    Ok(())
 }
 
 #[derive(Clone, Copy)]

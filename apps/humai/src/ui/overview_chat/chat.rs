@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use egui::{ScrollArea, Ui, Vec2};
+use egui::Ui;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -75,21 +75,15 @@ pub struct ChatMessage {
     pub assistant_generation: Option<AssistantGeneration>,
 }
 
-pub type MessageHandler = Box<dyn Fn(String) + Send + Sync>;
-pub type MessageCommitHook = Box<dyn Fn(&ChatMessage, &str) + Send + Sync>;
-
 pub struct ChatExample {
     pub messages: Vec<ChatMessage>,
     pub message_timestamps: Vec<String>,
     pub inbox: UiInbox<ChatMessage>,
     pub input_text: String,
-    pub message_handler: Option<MessageHandler>,
-    pub message_commit_hook: Option<MessageCommitHook>,
     pub waiting_for_response: Arc<std::sync::Mutex<bool>>,
     pub main_input_enabled: bool,
 
     pub rooms: Vec<Room>,
-    pub sidebar_open: bool,
     pub selected_room: Option<String>,
     pub room_mode_human_agent: bool,
 }
@@ -111,13 +105,6 @@ impl ChatExample {
             self.rooms.push(Room::new(id.clone(), name));
             self.selected_room = Some(id);
         }
-    }
-
-    pub fn rename_room(&mut self, id: &str, new_name: String, store: &mut super::store::Store) {
-        if let Some(room) = self.rooms.iter_mut().find(|r| r.id == id) {
-            room.name = new_name.clone();
-        }
-        let _ = store.rename_conversation(id, &new_name);
     }
 
     pub fn sidebar_ui(&mut self, ui: &mut Ui) {
@@ -144,7 +131,7 @@ impl ChatExample {
 
                         ui.add_space(6.0);
 
-                        let timer_value = super::panel::main_timer_display();
+                        let timer_value = crate::timer::main_timer_display();
                         Self::render_full_width_value_row(ui, &timer_value, value_row_width);
 
                         Self::section_separator(ui);
@@ -424,12 +411,9 @@ impl ChatExample {
             message_timestamps: vec![ts],
             inbox,
             input_text: String::new(),
-            message_handler: None,
-            message_commit_hook: None,
             waiting_for_response: Arc::new(std::sync::Mutex::new(false)),
             main_input_enabled: true,
             rooms: Vec::new(),
-            sidebar_open: true,
             selected_room: None,
             room_mode_human_agent: true,
         }
@@ -440,55 +424,12 @@ impl ChatExample {
         self.message_timestamps = message_timestamps;
     }
 
-    pub fn set_message_commit_hook(&mut self, hook: Option<MessageCommitHook>) {
-        self.message_commit_hook = hook;
-    }
-
-    fn commit_message(&mut self, msg: &ChatMessage, display_ts: &str) {
-        if let Some(hook) = &self.message_commit_hook {
-            hook(msg, display_ts);
-        }
-    }
-
-    pub fn inbox(&self) -> &UiInbox<ChatMessage> {
-        &self.inbox
-    }
-
-    pub fn set_message_handler(&mut self, handler: MessageHandler) {
-        self.message_handler = Some(handler);
-    }
-
     pub fn waiting_for_response(&self) -> &Arc<std::sync::Mutex<bool>> {
         &self.waiting_for_response
     }
 
     pub fn set_main_input_enabled(&mut self, enabled: bool) {
         self.main_input_enabled = enabled;
-    }
-
-    pub fn export_rows(&self) -> Vec<(String, String, String)> {
-        self.messages
-            .iter()
-            .enumerate()
-            .map(|(idx, msg)| {
-                let ts = if let Some(c) = &msg.correlation {
-                    c.timestamp_rfc3339.clone()
-                } else {
-                    self.message_timestamps
-                        .get(idx)
-                        .cloned()
-                        .unwrap_or_else(|| "--:--:--".to_string())
-                };
-                let from = msg.from.clone().unwrap_or_else(|| "Unknown".to_string());
-                (ts, from, msg.content.clone())
-            })
-            .collect()
-    }
-
-    pub fn reset_to_welcome(&mut self) {
-        let (w, t) = Self::default_welcome();
-        self.messages = vec![w];
-        self.message_timestamps = vec![t];
     }
 
 }

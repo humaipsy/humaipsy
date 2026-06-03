@@ -1,4 +1,4 @@
-use crate::agents::Arpsci;
+use crate::app_model::Humai;
 use crate::vault::MasterVault;
 use eframe::egui;
 use std::sync::atomic::AtomicBool;
@@ -31,11 +31,11 @@ impl Default for OllamaUiState {
 	}
 }
 
-pub(crate) struct ArpsciUiState {
+pub(crate) struct HumaiUiState {
 	pub(crate) ollama: OllamaUiState,
 }
 
-impl Default for ArpsciUiState {
+impl Default for HumaiUiState {
 	fn default() -> Self {
 		Self {
 			ollama: OllamaUiState::default(),
@@ -54,22 +54,22 @@ fn load_first_font_bytes(candidates: &[&str]) -> Option<Vec<u8>> {
 
 fn prepare_shell(
 	ctx: &egui::Context,
-	selected_theme: crate::agents::CatppuccinTheme,
-	last_applied_theme: &mut Option<crate::agents::CatppuccinTheme>,
+	selected_theme: crate::app_model::CatppuccinTheme,
+	last_applied_theme: &mut Option<crate::app_model::CatppuccinTheme>,
 	phosphor_fonts_installed: &mut bool,
 ) {
 	if *last_applied_theme != Some(selected_theme) {
 		match selected_theme {
-			crate::agents::CatppuccinTheme::Latte => {
+			crate::app_model::CatppuccinTheme::Latte => {
 				catppuccin_egui::set_theme(ctx, catppuccin_egui::LATTE)
 			}
-			crate::agents::CatppuccinTheme::Frappe => {
+			crate::app_model::CatppuccinTheme::Frappe => {
 				catppuccin_egui::set_theme(ctx, catppuccin_egui::FRAPPE)
 			}
-			crate::agents::CatppuccinTheme::Macchiato => {
+			crate::app_model::CatppuccinTheme::Macchiato => {
 				catppuccin_egui::set_theme(ctx, catppuccin_egui::MACCHIATO)
 			}
-			crate::agents::CatppuccinTheme::Mocha => {
+			crate::app_model::CatppuccinTheme::Mocha => {
 				catppuccin_egui::set_theme(ctx, catppuccin_egui::MOCHA)
 			}
 		}
@@ -134,8 +134,8 @@ fn prepare_shell(
 }
 
 fn refresh_ollama_models_on_startup(
-	ams_agents: &Arpsci,
-	ui_state: &mut ArpsciUiState,
+	humai: &Humai,
+	ui_state: &mut HumaiUiState,
 	ctx: &egui::Context,
 ) {
 	if ui_state.ollama.models.lock().unwrap().is_empty()
@@ -145,8 +145,8 @@ fn refresh_ollama_models_on_startup(
 		let models_arc = ui_state.ollama.models.clone();
 		let loading_arc = ui_state.ollama.models_loading.clone();
 		let ctx = ctx.clone();
-		let handle = ams_agents.rt_handle.clone();
-		let ollama_host = ams_agents.ollama_host.clone();
+		let handle = humai.rt_handle.clone();
+		let ollama_host = humai.ollama_host.clone();
 		handle.spawn(async move {
 			let models = crate::ollama::fetch_ollama_models(&ollama_host)
 				.await
@@ -158,31 +158,31 @@ fn refresh_ollama_models_on_startup(
 	}
 }
 
-pub struct ArpsciApp {
+pub struct HumaiApp {
 	vault: MasterVault,
-	ams_agents: Arpsci,
-	ui_state: ArpsciUiState,
-	last_applied_theme: Option<crate::agents::CatppuccinTheme>,
+	humai: Humai,
+	ui_state: HumaiUiState,
+	last_applied_theme: Option<crate::app_model::CatppuccinTheme>,
 	phosphor_fonts_installed: bool,
 }
 
-impl ArpsciApp {
+impl HumaiApp {
 	pub fn new(rt_handle: Handle) -> Self {
 		Self {
 			vault: MasterVault::new(),
-			ams_agents: Arpsci::new(rt_handle),
-			ui_state: ArpsciUiState::default(),
+			humai: Humai::new(rt_handle),
+			ui_state: HumaiUiState::default(),
 			last_applied_theme: None,
 			phosphor_fonts_installed: false,
 		}
 	}
 }
 
-impl eframe::App for ArpsciApp {
+impl eframe::App for HumaiApp {
 	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
 		prepare_shell(
 			ctx,
-			self.ams_agents.catppuccin_theme,
+			self.humai.catppuccin_theme,
 			&mut self.last_applied_theme,
 			&mut self.phosphor_fonts_installed,
 		);
@@ -203,11 +203,11 @@ impl eframe::App for ArpsciApp {
 			}
 		});
 
-		refresh_ollama_models_on_startup(&self.ams_agents, &mut self.ui_state, ctx);
+		refresh_ollama_models_on_startup(&self.humai, &mut self.ui_state, ctx);
 		egui::CentralPanel::default().show(ctx, |ui| {
 			ui.vertical(|ui| {
 				ui.set_min_height(ui.available_height());
-				self.ams_agents.render_main_panel(ui, &mut self.ui_state);
+				self.humai.render_main_panel(ui, &mut self.ui_state);
 			});
 		});
 	}

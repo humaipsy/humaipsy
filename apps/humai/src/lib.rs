@@ -1,14 +1,13 @@
-#![doc = include_str!("../../../README.md")]
-
 pub mod app_state;
-pub mod agents;
+pub mod app_model;
+pub mod agent;
 #[path = "recording/metrics.rs"]
 pub mod metrics;
 pub mod ollama;
 pub mod recording;
+pub mod timer;
 pub mod ui;
 pub mod vault;
-pub mod web;
 
-pub use agents::Arpsci;
-pub use ui::ArpsciApp;
+pub use app_model::Humai;
+pub use ui::HumaiApp;

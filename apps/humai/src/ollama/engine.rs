@@ -108,7 +108,7 @@ impl InferenceEngine {
         };
 
         let url = format!("{}/api/chat", self.host);
-        crate::web::guard_ollama_request(&url)?;
+        crate::ollama::guard_ollama_request(&url)?;
 
         let options = if req.options.max_output_tokens.is_some() || req.options.context_window.is_some() {
             Some(ChatOptions {

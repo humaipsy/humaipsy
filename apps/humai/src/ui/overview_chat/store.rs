@@ -1,16 +1,13 @@
-#[path = "store_export.rs"]
-mod export;
 #[path = "store_schema.rs"]
 mod schema;
 
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection};
-use rusqlite::OptionalExtension;
 
-use super::audit;
+use crate::recording::audit;
 use super::chat::{AssistantGeneration, ChatMessage, MessageCorrelation};
 use super::incoming::MessageSource;
 
@@ -53,42 +50,19 @@ impl From<serde_json::Error> for StoreError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConversationSettings {
-    pub selected_model: String,
-    pub chat_token_limit: i32,
-    pub chat_token_limit_enabled: bool,
-    pub ollama_token_limit: i32,
-    pub ollama_token_limit_enabled: bool,
-}
-
-impl Default for ConversationSettings {
-    fn default() -> Self {
-        Self {
-            selected_model: String::new(),
-            chat_token_limit: 70,
-            chat_token_limit_enabled: false,
-            ollama_token_limit: 70,
-            ollama_token_limit_enabled: false,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct ConversationSummary {
     pub id: String,
     pub name: String,
-    pub updated_at: String,
 }
 
 pub struct Store {
     conn: Mutex<Connection>,
-    path: PathBuf,
 }
 
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
-        let path = path.as_ref().to_path_buf();
+        let path = path.as_ref();
         // Ensure metrics directory exists when opening the embedded sqlite file.
         if let Some(parent) = path.parent()
             && !parent.as_os_str().is_empty()
@@ -104,28 +78,7 @@ impl Store {
         if ver < USER_VERSION {
             conn.execute_batch(&format!("PRAGMA user_version = {USER_VERSION};"))?;
         }
-        Ok(Self {
-            conn: Mutex::new(conn),
-            path,
-        })
-    }
-
-    pub fn bootstrap_or_load(
-        &self,
-    ) -> Result<(String, Vec<ChatMessage>, Vec<String>, ConversationSettings), StoreError> {
-        // Resume most recent room for continuity; fall back to bootstrapping a new room.
-        if let Some(id) = self.most_recent_conversation_id()? {
-            let (msgs, ts) = self.load_messages(&id)?;
-            let settings = self.load_conversation_settings(&id)?;
-            Ok((id, msgs, ts, settings))
-        } else {
-            let id = self.create_conversation()?;
-            Ok((id, Vec::new(), Vec::new(), ConversationSettings::default()))
-        }
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
+        Ok(Self { conn: Mutex::new(conn) })
     }
 
     pub fn create_conversation(&self) -> Result<String, StoreError> {
@@ -146,85 +99,18 @@ impl Store {
         Ok(())
     }
 
-    pub fn save_conversation_settings(
-        &self,
-        id: &str,
-        s: &ConversationSettings,
-    ) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            r#"UPDATE conversations SET
-                selected_model = ?2,
-                chat_token_limit = ?3,
-                chat_token_limit_enabled = ?4,
-                ollama_token_limit = ?5,
-                ollama_token_limit_enabled = ?6,
-                updated_at = ?7
-               WHERE id = ?1"#,
-            params![
-                id,
-                &s.selected_model,
-                s.chat_token_limit,
-                s.chat_token_limit_enabled as i32,
-                s.ollama_token_limit,
-                s.ollama_token_limit_enabled as i32,
-                audit::now_rfc3339(),
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn load_conversation_settings(
-        &self,
-        id: &str,
-    ) -> Result<ConversationSettings, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let s = conn.query_row(
-            r#"SELECT selected_model, chat_token_limit, chat_token_limit_enabled,
-                      ollama_token_limit, ollama_token_limit_enabled
-               FROM conversations WHERE id = ?1"#,
-            params![id],
-            |r| {
-                Ok(ConversationSettings {
-                    selected_model: r.get(0)?,
-                    chat_token_limit: r.get(1)?,
-                    chat_token_limit_enabled: r.get::<_, i32>(2)? != 0,
-                    ollama_token_limit: r.get(3)?,
-                    ollama_token_limit_enabled: r.get::<_, i32>(4)? != 0,
-                })
-            },
-        )?;
-        Ok(s)
-    }
-
-    pub fn most_recent_conversation_id(&self) -> Result<Option<String>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let id: Option<String> = conn
-            .query_row(
-                "SELECT id FROM conversations ORDER BY updated_at DESC LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
-            .optional()?;
-        Ok(id)
-    }
-
     pub fn list_conversations(&self, limit: usize) -> Result<Vec<ConversationSummary>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ?1",
+            "SELECT id, name FROM conversations ORDER BY updated_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit as i64], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (id, name, updated_at) = row?;
-            out.push(ConversationSummary {
-                id,
-                name,
-                updated_at,
-            });
+            let (id, name) = row?;
+            out.push(ConversationSummary { id, name });
         }
         Ok(out)
     }

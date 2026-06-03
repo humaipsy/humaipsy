@@ -27,7 +27,7 @@ pub(crate) fn normalize_ollama_host(input: &str) -> String {
 pub(crate) async fn fetch_models(ollama_host: &str) -> Result<Vec<String>> {
     let url = std::env::var("OLLAMA_TAGS_URL")
         .unwrap_or_else(|_| format!("{}/api/tags", normalize_ollama_host(ollama_host)));
-    crate::web::guard_ollama_request(&url)?;
+    crate::ollama::guard_ollama_request(&url)?;
     let client = reqwest::Client::new();
     let response = client.get(url).send().await?.error_for_status()?;
     let tags = response.json::<OllamaTagsResponse>().await?;

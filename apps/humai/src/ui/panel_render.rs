@@ -1,10 +1,10 @@
 use eframe::egui;
 
-use crate::agents::{Arpsci, MainPanelTab};
-use crate::ui::ArpsciUiState;
+use crate::app_model::{Humai, MainPanelTab};
+use crate::ui::HumaiUiState;
 
-impl Arpsci {
-    pub(crate) fn render_main_panel(&mut self, ui: &mut egui::Ui, ui_state: &mut ArpsciUiState) {
+impl Humai {
+    pub(crate) fn render_main_panel(&mut self, ui: &mut egui::Ui, ui_state: &mut HumaiUiState) {
         let panel_border_color = ui.visuals().widgets.noninteractive.bg_stroke.color;
         let panel = egui::Frame::default()
             .fill(ui.visuals().panel_fill)

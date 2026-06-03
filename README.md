@@ -5,10 +5,10 @@ Under heavy development.
 Repository for HumxAI (Humai) v0.1.
 
 - Cross-platform Application for Human-AI Interaction
-- Design Experimental Scientific Tests
+- Cognitive Science and HCI Experimental Design Application 
 - Integrated with Open-Weight Models
 - Local and Offline-First Field Architecture
-
+- Statistical Analysis Friendly Data Output
 
 ## Installation Windows/Linux
 

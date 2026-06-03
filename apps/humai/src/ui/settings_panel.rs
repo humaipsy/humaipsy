@@ -1,14 +1,14 @@
-use crate::agents::{Arpsci, CatppuccinTheme};
-use crate::ui::ArpsciUiState;
+use crate::app_model::{CatppuccinTheme, Humai};
+use crate::ui::HumaiUiState;
 use eframe::egui;
 use std::sync::atomic::Ordering;
 
-impl Arpsci {
+impl Humai {
     pub(super) fn render_ollama_settings_widgets(
         &mut self,
         ui: &mut egui::Ui,
         ctx: &egui::Context,
-        ui_state: &mut ArpsciUiState,
+        ui_state: &mut HumaiUiState,
     ) {
         ui.vertical(|ui| {
             ui.label(egui::RichText::new("Ollama Settings").strong().size(16.0));
@@ -195,7 +195,7 @@ impl Arpsci {
             });
             ui.label(
                 egui::RichText::new(
-                    "Default path is metrics/timings.jsonl and the file is intended for offline research analysis.",
+                    "Default path is metrics/timings.jsonl.",
                 )
                 .small()
                 .weak(),
