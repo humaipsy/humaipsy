@@ -1,4 +1,4 @@
-use humai::{ArpsciApp, web};
+use humai::ArpsciApp;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
@@ -15,10 +15,6 @@ fn main() -> eframe::Result<()> {
             }
         });
     });
-
-    if web::start_embedded_server_if_enabled(&rt_handle) {
-        eprintln!("Embedded Rocket server enabled (ARPSCI_WEB_ENABLED=true)");
-    }
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default().with_inner_size([1080.0, 800.0]),

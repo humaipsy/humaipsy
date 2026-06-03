@@ -48,7 +48,6 @@ impl Arpsci {
     fn capture_runtime_settings(&self) -> RunRuntimeSettings {
         RunRuntimeSettings {
             selected_model: self.selected_model_option(),
-            http_endpoint: self.http_endpoint.clone(),
             ollama_host: self.ollama_host.clone(),
             history_size: self.conversation_history_size,
             read_only_replay: self.read_only_replay_mode,
@@ -331,7 +330,6 @@ impl Arpsci {
         sync_evaluator_researcher_activity(&mut self.nodes_panel.agents);
 
         self.selected_ollama_model = manifest.runtime.selected_model.clone().unwrap_or_default();
-        self.http_endpoint = manifest.runtime.http_endpoint.clone();
         self.ollama_host = manifest.runtime.ollama_host.clone();
         self.conversation_history_size = manifest.runtime.history_size;
         self.air_gap_enabled = manifest.runtime.air_gap_enabled;

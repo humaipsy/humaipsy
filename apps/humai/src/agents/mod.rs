@@ -45,7 +45,6 @@ pub struct Arpsci {
     /// Base URL for the Ollama API (e.g. http://127.0.0.1:11434).
     pub(crate) ollama_host: String,
     pub(crate) metrics_config: MetricsConfig,
-    pub(crate) http_endpoint: String,
     pub(crate) last_message_in_chat: Arc<Mutex<Option<String>>>,
     pub(crate) conversation_message_events: Arc<Mutex<Vec<String>>>,
     pub(crate) last_evaluated_message_by_evaluator:
@@ -100,8 +99,6 @@ impl Arpsci {
             ollama_host: std::env::var("OLLAMA_HOST")
                 .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()),
             metrics_config,
-            http_endpoint: std::env::var("CONVERSATION_HTTP_ENDPOINT")
-                .unwrap_or_else(|_| "http://localhost:3000/".to_string()),
             last_message_in_chat: Arc::new(Mutex::new(None)),
             conversation_message_events: Arc::new(Mutex::new(Vec::new())),
             last_evaluated_message_by_evaluator: Arc::new(Mutex::new(

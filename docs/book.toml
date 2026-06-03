@@ -1,9 +1,0 @@
-[book]
-title = "ARPSCI Docs"
-authors = ["ARPSCI Team"]
-language = "en"
-src = "src"
-
-[output.html]
-default-theme = "light"
-git-repository-url = "https://github.com/arpsci/arp"

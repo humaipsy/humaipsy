@@ -7,7 +7,6 @@ use crate::run::event_ledger::EventLedger;
 use crate::run::manifest::RunContext;
 use crate::app_state::AppState;
 use crate::metrics::InferenceTraceContext;
-use crate::web::{send_evaluator_result, send_researcher_result};
 use crate::ollama::OllamaStopEpoch;
 use futures_util::future::join_all;
 use std::sync::Arc;
@@ -211,11 +210,9 @@ pub async fn run_researchers_before_worker_turn(
     message_for_research: &str,
     grounding: ResearchMessageGrounding,
     ollama_host: &str,
-    endpoint: &str,
     run_context: Option<&RunContext>,
     selected_model: Option<&str>,
     ollama_stop_epoch: Option<OllamaStopEpoch>,
-    post_http: bool,
     ledger: Option<&Arc<EventLedger>>,
     app_state: Arc<AppState>,
 ) -> Result<String, ()> {
@@ -299,20 +296,6 @@ pub async fn run_researchers_before_worker_turn(
                         }),
                     );
                 }
-                if post_http {
-                    if let Err(e) = send_researcher_result(
-                        endpoint,
-                        "Agent Researcher",
-                        &topic,
-                        &response,
-                        run_context,
-                        ledger,
-                    )
-                    .await
-                    {
-                        eprintln!("[Researcher] Failed to send to ams-chat: {}", e);
-                    }
-                }
                 blocks.push(format!(
                     "### References ({topic})\n{response}",
                     topic = topic,
@@ -383,11 +366,9 @@ pub async fn run_evaluator_sidecars_for_message(
     sidecars: &ConversationSidecarConfig,
     agent_message: &str,
     ollama_host: &str,
-    endpoint: &str,
     run_context: Option<&RunContext>,
     selected_model: Option<&str>,
     ollama_stop_epoch: Option<OllamaStopEpoch>,
-    post_http: bool,
     ledger: Option<&Arc<EventLedger>>,
     app_state: Arc<AppState>,
 ) -> Result<Vec<String>, ()> {
@@ -428,21 +409,7 @@ pub async fn run_evaluator_sidecars_for_message(
                         serde_json::json!({ "analysis_mode": ev.analysis_mode }),
                     );
                 }
-                let sentiment = evaluator_sentiment(ev.analysis_mode.as_str(), &response);
-                if post_http {
-                    if let Err(e) = send_evaluator_result(
-                        endpoint,
-                        "Agent Evaluator",
-                        sentiment,
-                        &response,
-                        run_context,
-                        ledger,
-                    )
-                    .await
-                    {
-                        eprintln!("[Evaluator] Failed to send to ams-chat: {}", e);
-                    }
-                }
+                let _ = evaluator_sentiment(ev.analysis_mode.as_str(), &response);
                 evaluator_outputs.push(response);
             }
             Err(e) => {

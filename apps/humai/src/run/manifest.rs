@@ -38,7 +38,6 @@ fn default_metrics() -> crate::metrics::MetricsConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunRuntimeSettings {
     pub selected_model: Option<String>,
-    pub http_endpoint: String,
     #[serde(default = "default_ollama_host")]
     pub ollama_host: String,
     pub history_size: usize,

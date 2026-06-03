@@ -113,14 +113,6 @@ impl Arpsci {
             ui.add_space(5.0);
 
             ui.horizontal(|ui| {
-                ui.label("Chat HTTP Endpoint:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.http_endpoint).desired_width(260.0),
-                );
-            });
-            ui.add_space(5.0);
-
-            ui.horizontal(|ui| {
                 if ui.button("Test API").clicked() {
                     *ui_state.ollama.test_status.lock().unwrap() = "Pinging Ollama...".to_string();
                     ui_state.ollama.test_running.store(true, Ordering::Relaxed);

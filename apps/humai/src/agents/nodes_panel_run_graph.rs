@@ -329,7 +329,6 @@ impl Arpsci {
     ) {
         let active_flag = Arc::new(Mutex::new(true));
         let flag_clone = active_flag.clone();
-        let endpoint = self.http_endpoint.clone();
         let ollama_host = self.ollama_host.clone();
         let last_msg = self.last_message_in_chat.clone();
         let message_events = self.conversation_message_events.clone();
@@ -357,7 +356,6 @@ impl Arpsci {
                 sidecars,
                 participants,
                 ollama_host,
-                endpoint,
                 flag_clone,
                 last_msg,
                 message_events,
