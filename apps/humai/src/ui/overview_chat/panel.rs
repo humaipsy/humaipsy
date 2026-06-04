@@ -67,8 +67,10 @@ fn total_experiment_trials() -> usize {
 }
 
 fn trial_descriptor(index: usize) -> TrialDescriptor {
-    let condition_index = index / EXP_TRIALS_PER_CONDITION;
-    let trial_in_condition = index % EXP_TRIALS_PER_CONDITION;
+    // Sequence by blocks: [COOP, ARGUM] x 2 blocks.
+    // This gives trial order: COOP-1, ARGUM-1, COOP-2, ARGUM-2.
+    let condition_index = index % EXP_CONDITION_NAMES.len();
+    let trial_in_condition = index / EXP_CONDITION_NAMES.len();
     TrialDescriptor {
         condition_index,
         trial_in_condition,
@@ -156,7 +158,7 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample) {
         session.trial_timeout_popup_open = false;
         session.finished_popup_open = true;
         drop(session);
-        crate::timer::stop_and_reset_main_timer();
+        crate::timer::pause_main_timer();
         append_message_to_chat_and_store(
             chat,
             store,
@@ -346,6 +348,9 @@ fn render_experiment_finished_popup(ctx: &egui::Context) {
     if !open {
         return;
     }
+
+    // Safety net: ensure timer is not running while experiment is finished.
+    crate::timer::pause_main_timer();
 
     let mut close_clicked = false;
     egui::Window::new("Experiment Finished")
