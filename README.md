@@ -1,8 +1,8 @@
-# HumxAI (Humai) v0.1
+# Humai v.0.1
 
-Under heavy development. 
+(Under heavy development)
 
-Repository for HumxAI (Humai) v0.1.
+Features:
 
 - Cross-platform Application for Human-AI Interaction
 - Cognitive Science and HCI Experimental Design Application 

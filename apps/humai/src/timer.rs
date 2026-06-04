@@ -73,6 +73,14 @@ pub fn main_timer_display() -> String {
     format_timer_hms(elapsed)
 }
 
+pub fn main_timer_elapsed_seconds() -> u64 {
+    MAIN_TIMER
+        .get_or_init(|| Mutex::new(MainTimerState::default()))
+        .lock()
+        .map(|timer| timer.elapsed().as_secs())
+        .unwrap_or(0)
+}
+
 pub fn main_timer_is_running() -> bool {
     MAIN_TIMER
         .get_or_init(|| Mutex::new(MainTimerState::default()))

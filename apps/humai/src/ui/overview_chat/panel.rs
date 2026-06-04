@@ -25,12 +25,19 @@ static EXP_RUN_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 static GLOBAL_INPUT_MODAL: OnceLock<Mutex<InputModalState>> = OnceLock::new();
 
+const EXP_CONDITION_NAMES: [&str; 2] = ["COOP", "ARGUM"];
+const EXP_TRIALS_PER_CONDITION: usize = 2;
+
 #[derive(Clone, Debug)]
 struct ExperimentSessionState {
     configured: bool,
     running: bool,
     experiment_id: Option<String>,
     run_id: Option<String>,
+    trial_index: usize,
+    trial_memory_start_idx: usize,
+    trial_timeout_popup_open: bool,
+    finished_popup_open: bool,
 }
 
 impl Default for ExperimentSessionState {
@@ -40,7 +47,334 @@ impl Default for ExperimentSessionState {
             running: false,
             experiment_id: None,
             run_id: None,
+            trial_index: 0,
+            trial_memory_start_idx: 0,
+            trial_timeout_popup_open: false,
+            finished_popup_open: false,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TrialDescriptor {
+    condition_index: usize,
+    trial_in_condition: usize,
+}
+
+fn total_experiment_trials() -> usize {
+    // 2 conditions x 2 trials per condition = 4 trial windows.
+    EXP_CONDITION_NAMES.len() * EXP_TRIALS_PER_CONDITION
+}
+
+fn trial_descriptor(index: usize) -> TrialDescriptor {
+    let condition_index = index / EXP_TRIALS_PER_CONDITION;
+    let trial_in_condition = index % EXP_TRIALS_PER_CONDITION;
+    TrialDescriptor {
+        condition_index,
+        trial_in_condition,
+    }
+}
+
+fn current_trial_descriptor_from_state(state: &ExperimentSessionState) -> TrialDescriptor {
+    let capped_index = state.trial_index.min(total_experiment_trials().saturating_sub(1));
+    trial_descriptor(capped_index)
+}
+
+fn experiment_status_label(state: &ExperimentSessionState) -> String {
+    if !state.configured {
+        return "Experiment".to_string();
+    }
+
+    let desc = current_trial_descriptor_from_state(state);
+    format!(
+        "Experiment, Cond {}, Trial {}",
+        desc.condition_index + 1,
+        desc.trial_in_condition + 1
+    )
+}
+
+fn condition_instruction_for_state(state: &ExperimentSessionState) -> &'static str {
+    let desc = current_trial_descriptor_from_state(state);
+    let condition = EXP_CONDITION_NAMES
+        .get(desc.condition_index)
+        .copied()
+        .unwrap_or("COOP");
+
+    match condition {
+        "ARGUM" => {
+            "Experimental condition ARGUM: be argumentative with the human participant. You must challenge assumptions, present counterpoints, and disagree when appropriate. Do NOT use a supportive or reassuring therapeutic style. Keep disagreement respectful, concise, and on-topic."
+        }
+        _ => {
+            "Experimental condition COOP: be cooperative with the human participant. Be supportive, collaborative, and help them progress constructively while staying safe and on-topic."
+        }
+    }
+}
+
+fn assistant_prompt_for_current_condition(base_prompt: &str) -> String {
+    let state = EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+        .map(|state| state.clone())
+        .unwrap_or_default();
+
+    format!(
+        "{}\n\n{}",
+        base_prompt,
+        condition_instruction_for_state(&state)
+    )
+}
+
+fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample) {
+    let was_running = crate::timer::main_timer_is_running();
+    let mut session = match EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+    {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+
+    if !session.configured {
+        append_message_to_chat_and_store(
+            chat,
+            store,
+            ChatMessage {
+                content: "Submit experiment settings before advancing trials.".to_string(),
+                from: Some("System".to_string()),
+                correlation: None,
+                source: MessageSource::System,
+                api_auto_respond: false,
+                assistant_generation: None,
+            },
+        );
+        return;
+    }
+
+    let next_index = session.trial_index + 1;
+    if next_index >= total_experiment_trials() {
+        session.running = false;
+        session.trial_timeout_popup_open = false;
+        session.finished_popup_open = true;
+        drop(session);
+        crate::timer::stop_and_reset_main_timer();
+        append_message_to_chat_and_store(
+            chat,
+            store,
+            ChatMessage {
+                content: "Experiment Finished".to_string(),
+                from: Some("System".to_string()),
+                correlation: None,
+                source: MessageSource::System,
+                api_auto_respond: false,
+                assistant_generation: None,
+            },
+        );
+        return;
+    }
+
+    session.trial_index = next_index;
+    session.trial_memory_start_idx = chat.messages.len();
+    session.trial_timeout_popup_open = false;
+    let desc = current_trial_descriptor_from_state(&session);
+    let condition = EXP_CONDITION_NAMES
+        .get(desc.condition_index)
+        .copied()
+        .unwrap_or("COOP");
+    drop(session);
+
+    append_message_to_chat_and_store(
+        chat,
+        store,
+        ChatMessage {
+            content: format!(
+                "Moved to condition {} ({}), trial {}.",
+                desc.condition_index + 1,
+                condition,
+                desc.trial_in_condition + 1
+            ),
+            from: Some("System".to_string()),
+            correlation: None,
+            source: MessageSource::System,
+            api_auto_respond: false,
+            assistant_generation: None,
+        },
+    );
+
+    if was_running {
+        crate::timer::stop_and_reset_main_timer();
+        crate::timer::start_main_timer();
+    }
+
+    let design = HUMAI_EXPDESIGN
+        .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
+        .lock()
+        .map(|design| design.clone())
+        .unwrap_or_default();
+
+    let topic = design.topic.trim().to_string();
+    let participant_id = design.participant_id.trim().to_string();
+    let model = app.selected_ollama_model.trim().to_string();
+
+    if topic.is_empty() || participant_id.is_empty() || model.is_empty() {
+        append_message_to_chat_and_store(
+            chat,
+            store,
+            ChatMessage {
+                content: "Cannot start next trial question: missing topic, participant ID, or model."
+                    .to_string(),
+                from: Some("System".to_string()),
+                correlation: None,
+                source: MessageSource::System,
+                api_auto_respond: false,
+                assistant_generation: None,
+            },
+        );
+        return;
+    }
+
+    spawn_ollama_opening_question(app, chat, topic, participant_id, model);
+}
+
+fn handle_trial_timeout(app: &Humai, store: &Store, chat: &mut ChatExample) {
+    if !crate::timer::main_timer_is_running() {
+        return;
+    }
+
+    let trial_seconds = HUMAI_EXPDESIGN
+        .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
+        .lock()
+        .map(|design| design.trial_seconds.max(1) as u64)
+        .unwrap_or(120);
+
+    if crate::timer::main_timer_elapsed_seconds() < trial_seconds {
+        return;
+    }
+
+    let desc = {
+        let mut session = match EXPERIMENT_SESSION
+            .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+            .lock()
+        {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+
+        if !session.configured || !session.running {
+            return;
+        }
+
+        session.trial_timeout_popup_open = true;
+        current_trial_descriptor_from_state(&session)
+    };
+
+    let condition = EXP_CONDITION_NAMES
+        .get(desc.condition_index)
+        .copied()
+        .unwrap_or("COOP");
+    append_message_to_chat_and_store(
+        chat,
+        store,
+        ChatMessage {
+            content: format!(
+                "Trial ended: condition {} ({}), trial {} reached {} seconds. Advancing to next trial.",
+                desc.condition_index + 1,
+                condition,
+                desc.trial_in_condition + 1,
+                trial_seconds
+            ),
+            from: Some("System".to_string()),
+            correlation: None,
+            source: MessageSource::System,
+            api_auto_respond: false,
+            assistant_generation: None,
+        },
+    );
+
+    advance_to_next_trial(app, store, chat);
+}
+
+fn render_trial_timeout_popup(ctx: &egui::Context) {
+    let mut open = EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+        .map(|state| state.trial_timeout_popup_open)
+        .unwrap_or(false);
+
+    if !open {
+        return;
+    }
+
+    let mut close_clicked = false;
+    egui::Window::new("Trial Time Limit Reached")
+        .collapsible(false)
+        .resizable(false)
+        .movable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .fixed_size(egui::vec2(360.0, 140.0))
+        .open(&mut open)
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(12.0);
+                ui.label("Current trial ended by time limit.");
+                ui.label("Advancing to the next trial.");
+                ui.add_space(12.0);
+                if ui.button("OK").clicked() {
+                    close_clicked = true;
+                }
+            });
+        });
+
+    if close_clicked {
+        open = false;
+    }
+
+    if let Ok(mut state) = EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+    {
+        state.trial_timeout_popup_open = open;
+    }
+}
+
+fn render_experiment_finished_popup(ctx: &egui::Context) {
+    let mut open = EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+        .map(|state| state.finished_popup_open)
+        .unwrap_or(false);
+
+    if !open {
+        return;
+    }
+
+    let mut close_clicked = false;
+    egui::Window::new("Experiment Finished")
+        .collapsible(false)
+        .resizable(false)
+        .movable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .fixed_size(egui::vec2(320.0, 120.0))
+        .open(&mut open)
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(12.0);
+                ui.label("Experiment Finished");
+                ui.add_space(12.0);
+                if ui.button("OK").clicked() {
+                    close_clicked = true;
+                }
+            });
+        });
+
+    if close_clicked {
+        open = false;
+    }
+
+    if let Ok(mut state) = EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+    {
+        state.finished_popup_open = open;
     }
 }
 
@@ -94,9 +428,21 @@ fn append_message_to_chat_and_store(
     }
 }
 
-fn agent_memory_from_chat(chat: &ChatExample) -> Vec<crate::agent::AgentMemoryMessage> {
+fn current_trial_memory_start_index() -> usize {
+    EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+        .map(|state| state.trial_memory_start_idx)
+        .unwrap_or(0)
+}
+
+fn agent_memory_from_chat(
+    chat: &ChatExample,
+    start_index: usize,
+) -> Vec<crate::agent::AgentMemoryMessage> {
     chat.messages
         .iter()
+        .skip(start_index.min(chat.messages.len()))
         .filter_map(|msg| {
             let role = match msg.source {
                 MessageSource::Human => crate::agent::AgentRole::User,
@@ -129,7 +475,7 @@ fn spawn_ollama_opening_question(
     let selected_room = chat.selected_room.clone();
     let store_path = PathBuf::from("metrics/overview_chat.sqlite");
     let ollama_host = app.ollama_host.clone();
-    let assistant_prompt = app.assistant_prompt.clone();
+    let assistant_prompt = assistant_prompt_for_current_condition(&app.assistant_prompt);
     let app_state = app.app_state.clone();
     let history_size = app.conversation_history_size;
 
@@ -263,7 +609,14 @@ fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample
         state.configured = true;
         state.experiment_id = Some(experiment_id);
         state.run_id = Some(run_id);
+        state.trial_index = 0;
+        state.trial_memory_start_idx = chat.messages.len();
+        state.trial_timeout_popup_open = false;
+        state.finished_popup_open = false;
     }
+
+    // Release the lock before creating prompts that also read experiment state.
+    drop(session);
 
     append_message_to_chat_and_store(
         chat,
@@ -305,7 +658,7 @@ impl Default for HumaiExpDesign {
             conditions: 2,
             blocks: 2,
             trials: 2,
-            trial_seconds: 3000,
+            trial_seconds: 120,
             topic: "computer architecture".to_string(),
             question: String::new(),
         }
@@ -420,6 +773,9 @@ pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
         chat.message_timestamps.push(ts);
         chat.messages.push(item);
     }
+
+    handle_trial_timeout(app, &store, &mut chat);
+
     chat.set_rooms(rooms.clone());
     if chat.selected_room.is_none() {
         chat.selected_room = rooms.first().map(|room| room.id.clone());
@@ -606,12 +962,27 @@ fn render_chat_rectangle(
                         .stroke(bar_stroke)
                         .inner_margin(egui::Margin::symmetric(8, 0))
                         .show(ui, |ui| {
+                            let status_label = EXPERIMENT_SESSION
+                                .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+                                .lock()
+                                .map(|state| experiment_status_label(&state))
+                                .unwrap_or_else(|_| "Experiment".to_string());
+
                             ui.allocate_ui_with_layout(
                                 egui::vec2(ui.available_width(), top_row_height),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
-                                    ui.label(egui::RichText::new("Experiment").strong());
+                                    ui.label(egui::RichText::new(status_label).strong());
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        let next_btn = egui::Button::new(">>").small();
+                                        if ui
+                                            .add(next_btn)
+                                            .on_hover_text("Move to next trial")
+                                            .clicked()
+                                        {
+                                            advance_to_next_trial(app, store, chat);
+                                        }
+
                                         let stop_btn = egui::Button::new(
                                             egui::RichText::new(regular::X)
                                                 .line_height(Some(ui.text_style_height(&egui::TextStyle::Body))),
@@ -624,6 +995,15 @@ fn render_chat_rectangle(
                                         {
                                             crate::timer::stop_and_reset_main_timer();
                                             set_experiment_running(false);
+                                            if let Ok(mut state) = EXPERIMENT_SESSION
+                                                .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+                                                .lock()
+                                            {
+                                                state.trial_index = 0;
+                                                state.trial_memory_start_idx = 0;
+                                                state.trial_timeout_popup_open = false;
+                                                state.finished_popup_open = false;
+                                            }
                                         }
 
                                         let pause_btn = egui::Button::new(
@@ -752,7 +1132,6 @@ fn render_chat_rectangle(
                                 });
                         },
                     );
-                  
                 });
 
             ui.add_space(6.0);
@@ -801,7 +1180,9 @@ fn render_chat_rectangle(
                             let _ = store.append_message(room_id, &user_message, &ts);
                         }
 
-                        let memory_snapshot = agent_memory_from_chat(chat);
+                        let trial_memory_start_index = current_trial_memory_start_index();
+                        let memory_snapshot =
+                            agent_memory_from_chat(chat, trial_memory_start_index);
 
                         let tx = chat.inbox.sender();
                         let waiting = chat.waiting_for_response().clone();
@@ -809,7 +1190,7 @@ fn render_chat_rectangle(
                         let store_path = PathBuf::from("metrics/overview_chat.sqlite");
                         let model = app.selected_ollama_model.trim().to_string();
                         let ollama_host = app.ollama_host.clone();
-                        let assistant_prompt = app.assistant_prompt.clone();
+                        let assistant_prompt = assistant_prompt_for_current_condition(&app.assistant_prompt);
                         let app_state = app.app_state.clone();
                         let history_size = app.conversation_history_size;
                         if model.is_empty() {
@@ -1125,6 +1506,8 @@ fn render_right_bar(
             });
         });
     render_participant_id_modal(ui.ctx());
+    render_trial_timeout_popup(ui.ctx());
+    render_experiment_finished_popup(ui.ctx());
 }
 
 fn open_participant_id_modal() {
