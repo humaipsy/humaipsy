@@ -1522,11 +1522,27 @@ fn render_right_bar(
                                         ui.add_space(8.0);
                                         ui.separator();
                                         ui.add_space(8.0);
+
+                                        
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "groups={} | blocks={} | trials={} | seconds={}",
+                                                exp_snapshot.groups,
+                                                exp_snapshot.blocks,
+                                                exp_snapshot.trials,
+                                                exp_snapshot.trial_seconds,
+                                            ))
+                                            .small()
+                                            .weak(),
+                                        );
+                                        
+                                        ui.add_space(4.0);
                                         ui.horizontal(|ui| {
                                             if ui.button("Submit").clicked() {
                                                 open_participant_id_modal();
                                             }
                                         });
+                                        
                                     });
                             },
                         );
