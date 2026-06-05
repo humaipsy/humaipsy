@@ -18,13 +18,16 @@ binaries/*
 .master_hash
 agents-workspace.json
 
-timings.jsonl
+# Local code-signing configuration (contains secrets/paths)
+signing/windows-signing.env
+
+timings.csv
 
 
 overview_chat_audit.jsonl
-overview_chat.sqlite
+chat.sqlite
 metrics/overview_chat_audit.jsonl
-metrics/overview_chat.sqlite
+metrics/chat.sqlite
 
 
 exp_*/

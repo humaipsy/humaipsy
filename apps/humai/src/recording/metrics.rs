@@ -9,8 +9,10 @@ use std::time::Instant;
 pub use crate::recording::timing::InferenceTraceContext;
 
 fn default_metrics_file() -> String {
-    "metrics/timings.jsonl".to_string()
+    "metrics/timings.csv".to_string()
 }
+
+const METRICS_CSV_HEADER: &str = "record_kind,event_type,timestamp,source,experiment_id,run_id,node_global_id,model,success,error,t_start,t_first_token,t_end,duration_ms,ttft_ms,ttft_us,input_chars,output_chars,prompt_token_count,candidates_token_count,total_token_count,turn_index,prompt,loop_key_node_id,speaker_id,speaker_name,receiver_id,receiver_name,gap_ms,gap_us";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MetricsConfig {
@@ -136,29 +138,121 @@ impl FileMetricsSink {
             .append(true)
             .open(path)
             .with_context(|| format!("open metrics sink at {}", path.display()))?;
+        let needs_header = fs::metadata(path).map(|m| m.len() == 0).unwrap_or(true);
+        let mut writer = BufWriter::new(file);
+        if needs_header {
+            writeln!(writer, "{METRICS_CSV_HEADER}").context("write metrics csv header")?;
+            writer.flush().ok();
+        }
         Ok(Self {
-            writer: Mutex::new(BufWriter::new(file)),
+            writer: Mutex::new(writer),
         })
     }
 
-    fn emit_json_line<T: Serialize>(&self, event: &T) -> Result<()> {
-        let line = serde_json::to_string(event).context("serialize metrics event")?;
+    fn csv_cell(value: &str) -> String {
+        if value.contains([',', '"', '\n', '\r']) {
+            format!("\"{}\"", value.replace('"', "\"\""))
+        } else {
+            value.to_string()
+        }
+    }
+
+    fn csv_opt<T: ToString>(value: Option<T>) -> String {
+        value.map(|v| v.to_string()).unwrap_or_default()
+    }
+
+    fn emit_csv_line(&self, cells: &[String]) -> Result<()> {
+        let line = cells
+            .iter()
+            .map(|c| Self::csv_cell(c))
+            .collect::<Vec<_>>()
+            .join(",");
         let mut guard = self.writer.lock().unwrap();
         writeln!(guard, "{line}").context("write metrics line")?;
         guard.flush().ok();
         Ok(())
     }
+
+    fn emit_inference_csv_line(&self, event: InferenceTimingEvent) -> Result<()> {
+        self.emit_csv_line(&[
+            "inference".to_string(),
+            event.event_type,
+            event.timestamp,
+            event.source,
+            Self::csv_opt(event.experiment_id),
+            Self::csv_opt(event.run_id),
+            Self::csv_opt(event.node_global_id),
+            Self::csv_opt(event.model),
+            event.success.to_string(),
+            Self::csv_opt(event.error),
+            event.t_start,
+            Self::csv_opt(event.t_first_token),
+            event.t_end,
+            event.duration_ms.to_string(),
+            Self::csv_opt(event.ttft_ms),
+            Self::csv_opt(event.ttft_us),
+            event.input_chars.to_string(),
+            event.output_chars.to_string(),
+            Self::csv_opt(event.prompt_token_count),
+            Self::csv_opt(event.candidates_token_count),
+            Self::csv_opt(event.total_token_count),
+            Self::csv_opt(event.turn_index),
+            Self::csv_opt(event.prompt),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ])
+    }
+
+    fn emit_turn_csv_line(&self, event: TurnTimingEvent) -> Result<()> {
+        self.emit_csv_line(&[
+            "turn".to_string(),
+            event.event_type,
+            event.timestamp,
+            String::new(),
+            Self::csv_opt(event.experiment_id),
+            Self::csv_opt(event.run_id),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            event.turn_index.to_string(),
+            String::new(),
+            event.loop_key_node_id.to_string(),
+            event.speaker_id.to_string(),
+            event.speaker_name,
+            event.receiver_id.to_string(),
+            event.receiver_name,
+            Self::csv_opt(event.gap_ms),
+            Self::csv_opt(event.gap_us),
+        ])
+    }
 }
 
 impl MetricsSink for FileMetricsSink {
     fn record_inference(&self, event: InferenceTimingEvent) {
-        if let Err(e) = self.emit_json_line(&event) {
+        if let Err(e) = self.emit_inference_csv_line(event) {
             eprintln!("[Metrics] failed to write inference event: {e}");
         }
     }
 
     fn record_turn(&self, event: TurnTimingEvent) {
-        if let Err(e) = self.emit_json_line(&event) {
+        if let Err(e) = self.emit_turn_csv_line(event) {
             eprintln!("[Metrics] failed to write turn event: {e}");
         }
     }
@@ -232,13 +326,13 @@ mod tests {
     fn metrics_config_default_is_enabled() {
         let cfg = MetricsConfig::default();
         assert!(cfg.enabled);
-        assert_eq!(cfg.metrics_file, "metrics/timings.jsonl");
+        assert_eq!(cfg.metrics_file, "metrics/timings.csv");
     }
 
     #[test]
-    fn file_sink_writes_jsonl() {
+    fn file_sink_writes_csv() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let path = tmp.path().join("timings.jsonl");
+        let path = tmp.path().join("timings.csv");
         let sink = FileMetricsSink::new(path.as_path()).expect("sink");
 
         sink.record_inference(InferenceTimingEvent {
@@ -267,10 +361,12 @@ mod tests {
         });
 
         let raw = fs::read_to_string(path).expect("read metrics file");
-        assert_eq!(raw.lines().count(), 1);
-        let v: serde_json::Value = serde_json::from_str(raw.trim()).expect("valid json line");
-        assert_eq!(v["event_type"], EVENT_TYPE_INFERENCE_TIMING);
-        assert_eq!(v["source"], "test");
+        let mut lines = raw.lines();
+        let header = lines.next().expect("csv header line");
+        let row = lines.next().expect("csv data row");
+        assert_eq!(header, METRICS_CSV_HEADER);
+        assert!(row.contains(EVENT_TYPE_INFERENCE_TIMING));
+        assert!(row.contains("test"));
     }
 
     #[test]

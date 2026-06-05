@@ -98,6 +98,36 @@ impl Humai {
             }
 
             ui.add_space(10.0);
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(egui::RichText::new("Agent").strong().size(16.0));
+                ui.separator();
+                ui.label(
+                    egui::RichText::new(
+                        "Define the condition prompts appended to the global assistant prompt for Ollama agent runs.",
+                    )
+                    .small()
+                    .weak(),
+                );
+                ui.add_space(6.0);
+
+                ui.label("COOP prompt:");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.coop_agent_prompt)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(4),
+                );
+
+                ui.add_space(8.0);
+                ui.label("ARGUM prompt:");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.argum_agent_prompt)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(4),
+                );
+            });
+
+            ui.add_space(10.0);
             ui.label(egui::RichText::new("Ollama Test").strong().size(16.0));
             ui.separator();
             ui.horizontal(|ui| {
@@ -174,7 +204,7 @@ impl Humai {
                 if ui
                     .checkbox(
                         &mut self.metrics_config.enabled,
-                        "Enable Ollama timing metrics (JSONL)",
+                        "Enable Ollama timing metrics (CSV)",
                     )
                     .changed()
                 {
@@ -195,7 +225,7 @@ impl Humai {
             });
             ui.label(
                 egui::RichText::new(
-                    "Default path is metrics/timings.jsonl.",
+                    "Default path is metrics/timings.csv.",
                 )
                 .small()
                 .weak(),

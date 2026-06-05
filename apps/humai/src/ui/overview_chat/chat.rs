@@ -108,7 +108,7 @@ impl ChatExample {
     }
 
     pub fn sidebar_ui(&mut self, ui: &mut Ui) {
-        let mut store = match super::store::Store::open("metrics/overview_chat.sqlite") {
+        let mut store = match super::store::Store::open("metrics/chat.sqlite") {
             Ok(s) => s,
             Err(_) => return,
         };

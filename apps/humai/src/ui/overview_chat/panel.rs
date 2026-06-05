@@ -478,7 +478,7 @@ fn spawn_ollama_opening_question(
     let tx = chat.inbox.sender();
     let waiting = chat.waiting_for_response().clone();
     let selected_room = chat.selected_room.clone();
-    let store_path = PathBuf::from("metrics/overview_chat.sqlite");
+    let store_path = PathBuf::from("metrics/chat.sqlite");
     let ollama_host = app.ollama_host.clone();
     let assistant_prompt = assistant_prompt_for_current_condition(&app.assistant_prompt);
     let app_state = app.app_state.clone();
@@ -664,8 +664,8 @@ impl Default for HumaiExpDesign {
             blocks: 2,
             trials: 2,
             trial_seconds: 120,
-            topic: "computer architecture".to_string(),
-            question: String::new(),
+            topic: "Mental Health".to_string(),
+            question: "Are you happy?".to_string(),
         }
     }
 }
@@ -707,7 +707,7 @@ impl Default for InputModalState {
 }
 
 pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
-    let db_path = PathBuf::from("metrics/overview_chat.sqlite");
+    let db_path = PathBuf::from("metrics/chat.sqlite");
     let store = match Store::open(db_path) {
         Ok(store) => store,
         Err(err) => {
@@ -1192,7 +1192,7 @@ fn render_chat_rectangle(
                         let tx = chat.inbox.sender();
                         let waiting = chat.waiting_for_response().clone();
                         let selected_room = chat.selected_room.clone();
-                        let store_path = PathBuf::from("metrics/overview_chat.sqlite");
+                        let store_path = PathBuf::from("metrics/chat.sqlite");
                         let model = app.selected_ollama_model.trim().to_string();
                         let ollama_host = app.ollama_host.clone();
                         let assistant_prompt = assistant_prompt_for_current_condition(&app.assistant_prompt);
@@ -1349,10 +1349,12 @@ fn render_right_bar(
                                             );
                                         };
 
-                                        left_row(ui, format!("CSV: {}", exp_snapshot.csv_name));
-                                        ui.add_space(4.0);
                                         left_row(ui, "Exp. Design".to_string());
                                         ui.add_space(4.0);
+
+                                        left_row(ui, format!("CSV: {}", exp_snapshot.csv_name));
+                                        ui.add_space(4.0);
+                                        
                                         left_row(ui, format!("Groups: {}", exp_snapshot.groups));
                                         ui.add_space(4.0);
                                         left_row(ui, format!("Conditions: {}", exp_snapshot.conditions));
@@ -1364,6 +1366,8 @@ fn render_right_bar(
                                         left_row(ui, format!("Trial (s): {}", exp_snapshot.trial_seconds));
                                         ui.add_space(4.0);
                                         left_row(ui, format!("Topic: {}", exp_snapshot.topic));
+                                        ui.add_space(4.0);
+                                        left_row(ui, format!("Question: {}", exp_snapshot.question));
 
 
 
@@ -1406,13 +1410,19 @@ fn render_right_bar(
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            ui.label("Between Subjects (type group name)");
+                                            ui.label("Between Subjects (Group)");
                                         });
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            let _ = ui.button("Groups");
-                                            let _ = ui.button("Group 1");
+                                            ui.label("Groups:");
+                                            if let Ok(mut design) = exp_design.lock() {
+                                                ui.add(
+                                                    egui::DragValue::new(&mut design.groups)
+                                                        .range(1..=32)
+                                                        .speed(0.05),
+                                                );
+                                            }
                                         });
 
                                         ui.add_space(4.0);
@@ -1422,9 +1432,7 @@ fn render_right_bar(
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            let _ = ui.button("Conditions");
-                                            let _ = ui.button("Coop");
-                                            let _ = ui.button("Argum");
+                                            ui.label("Coop x Argum");
                                         });
 
                                         ui.add_space(4.0);
@@ -1434,8 +1442,14 @@ fn render_right_bar(
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            let _ = ui.button("No Trials");
-                                            let _ = ui.button(exp_snapshot.blocks.to_string());
+                                            ui.label("Blocks:");
+                                            if let Ok(mut design) = exp_design.lock() {
+                                                ui.add(
+                                                    egui::DragValue::new(&mut design.blocks)
+                                                        .range(1..=32)
+                                                        .speed(0.05),
+                                                );
+                                            }
                                         });
 
                                         ui.add_space(4.0);
@@ -1445,8 +1459,14 @@ fn render_right_bar(
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            let _ = ui.button("No Trials");
-                                            let _ = ui.button(exp_snapshot.trials.to_string());
+                                            ui.label("Trials:");
+                                            if let Ok(mut design) = exp_design.lock() {
+                                                ui.add(
+                                                    egui::DragValue::new(&mut design.trials)
+                                                        .range(1..=32)
+                                                        .speed(0.05),
+                                                );
+                                            }
                                         });
 
                                         ui.add_space(4.0);
@@ -1456,8 +1476,31 @@ fn render_right_bar(
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            let _ = ui.button("Seconds");
-                                            let _ = ui.button(exp_snapshot.trial_seconds.to_string());
+                                            ui.label("Seconds:");
+                                            if let Ok(mut design) = exp_design.lock() {
+                                                ui.add(
+                                                    egui::DragValue::new(&mut design.trial_seconds)
+                                                        .range(1..=3600)
+                                                        .speed(1.0),
+                                                );
+                                            }
+                                        });
+
+                                        
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label("Topic:​");
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            if let Ok(mut design) = exp_design.lock() {
+                                                ui.add(
+                                                    egui::TextEdit::singleline(&mut design.topic)
+                                                        .desired_width((right_width - 24.0).max(120.0)),
+                                                );
+                                            }
                                         });
 
                                         ui.add_space(4.0);
@@ -1476,31 +1519,13 @@ fn render_right_bar(
                                             }
                                         });
 
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Topic​");
-                                        });
-
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            if let Ok(mut design) = exp_design.lock() {
-                                                ui.add(
-                                                    egui::TextEdit::singleline(&mut design.topic)
-                                                        .desired_width((right_width - 24.0).max(120.0)),
-                                                );
-                                            }
-                                        });
-
                                         ui.add_space(8.0);
                                         ui.separator();
                                         ui.add_space(8.0);
                                         ui.horizontal(|ui| {
-                                            let _ = ui.button("Reset");
                                             if ui.button("Submit").clicked() {
                                                 open_participant_id_modal();
                                             }
-                                            let _ = ui.button("Download");
-                                            let _ = ui.button("Upload");
                                         });
                                     });
                             },

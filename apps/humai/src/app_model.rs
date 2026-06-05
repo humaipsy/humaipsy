@@ -33,6 +33,8 @@ pub struct Humai {
     pub(crate) app_state: Arc<AppState>,
     pub(crate) selected_ollama_model: String,
     pub(crate) assistant_prompt: String,
+    pub(crate) coop_agent_prompt: String,
+    pub(crate) argum_agent_prompt: String,
     pub(crate) conversation_history_size: usize,
     pub(crate) air_gap_enabled: bool,
     pub(crate) allow_local_ollama: bool,
@@ -54,6 +56,12 @@ impl Humai {
         crate::ollama::set_http_policy(http_policy);
         let metrics_config = MetricsConfig::from_env();
         let app_state = Arc::new(AppState::new(metrics_config.clone()));
+        let coop_agent_prompt = std::env::var("HUMAI_COOP_AGENT_PROMPT").unwrap_or_else(|_| {
+            "Experimental condition COOP: be cooperative with the human participant. Be supportive, collaborative, and help them progress constructively while staying safe and on-topic.".to_string()
+        });
+        let argum_agent_prompt = std::env::var("HUMAI_ARGUM_AGENT_PROMPT").unwrap_or_else(|_| {
+            "Experimental condition ARGUM: be argumentative with the human participant. You must challenge assumptions, present counterpoints, and disagree when appropriate. Do NOT use a supportive or reassuring therapeutic style. Keep disagreement respectful, concise, and on-topic.".to_string()
+        });
 
         Self {
             rt_handle,
@@ -62,6 +70,8 @@ impl Humai {
             assistant_prompt: std::env::var("HUMAI_ASSISTANT_PROMPT").unwrap_or_else(|_| {
                 "You are HumaiAgent, the experiment assistant for human-to-agent conversations. Be clear, neutral, and helpful. Keep responses concise and actionable when possible.".to_string()
             }),
+            coop_agent_prompt,
+            argum_agent_prompt,
             conversation_history_size: 5,
             air_gap_enabled: http_policy.air_gap_enabled,
             allow_local_ollama: http_policy.allow_local_ollama,
