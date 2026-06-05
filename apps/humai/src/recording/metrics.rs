@@ -31,7 +31,7 @@ impl Default for MetricsConfig {
 
 impl MetricsConfig {
     pub fn from_env() -> Self {
-        let metrics_file = std::env::var("ARPSCI_METRICS_FILE")
+        let metrics_file = std::env::var("HUMAI_METRICS_FILE")
             .ok()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(default_metrics_file);

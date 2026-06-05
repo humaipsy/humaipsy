@@ -1,9 +1,11 @@
 //! Master-password gate (Argon2id) and a small encrypted [`Vault`] container.
 //!
-//! Configure with `ARPSCI_MASTER_HASH` (PHC string) or a file at `runs/.master_hash` (first line).
-//! Optional Argon2id tuning via env: `ARPSCI_ARGON2_M_KIB`, `ARPSCI_ARGON2_T`, `ARPSCI_ARGON2_P`.
-//! Set `ENABLE_PASSWORD_LOCK` to `false` for instant unlocked startup in development.
-//! Set `ARPSCI_SKIP_VAULT=1` to disable the gate (development only).
+//! Configure with `HUMAI_MASTER_HASH` (PHC string) or a file at `vault/.master_hash` (first line).
+//! Optional Argon2id tuning via env: `HUMAI_ARGON2_M_KIB`, `HUMAI_ARGON2_T`, `HUMAI_ARGON2_P`.
+//! In release builds, the password lock is always enforced.
+//! In debug builds, startup is unlocked by default for faster development.
+//! Set `HUMAI_ENABLE_PASSWORD_LOCK=1` to enforce locking in debug builds.
+//! Set `HUMAI_SKIP_VAULT=1` to bypass locking in debug builds.
 
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 use argon2::{Algorithm, Argon2, Params, PasswordHash, PasswordVerifier, Version};
@@ -15,10 +17,9 @@ use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
-const DEFAULT_HASH_FILE: &str = "runs/.master_hash";
-/// Development toggle: keep `false` to boot unlocked; set `true` to enforce the password gate.
-pub const ENABLE_PASSWORD_LOCK: bool = false;
+const DEFAULT_HASH_FILE: &str = "vault/.master_hash";
 const ARGON2_M_KIB_DEFAULT: u32 = 64 * 1024;
 const ARGON2_T_DEFAULT: u32 = 3;
 const ARGON2_P_MAX: u32 = 4;
@@ -30,6 +31,16 @@ fn parse_u32_env(name: &str) -> Option<u32> {
     std::env::var(name)
         .ok()
         .and_then(|s| s.trim().parse::<u32>().ok())
+}
+
+fn parse_bool_env(name: &str) -> Option<bool> {
+    std::env::var(name).ok().and_then(|raw| {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        }
+    })
 }
 
 fn default_parallelism() -> u32 {
@@ -131,9 +142,9 @@ impl VaultKdfParams {
     pub fn from_env() -> Self {
         let defaults = Self::default();
         Self {
-            memory_cost_kib: parse_u32_env("ARPSCI_ARGON2_M_KIB").unwrap_or(defaults.memory_cost_kib),
-            time_cost: parse_u32_env("ARPSCI_ARGON2_T").unwrap_or(defaults.time_cost),
-            parallelism: parse_u32_env("ARPSCI_ARGON2_P").unwrap_or(defaults.parallelism),
+            memory_cost_kib: parse_u32_env("HUMAI_ARGON2_M_KIB").unwrap_or(defaults.memory_cost_kib),
+            time_cost: parse_u32_env("HUMAI_ARGON2_T").unwrap_or(defaults.time_cost),
+            parallelism: parse_u32_env("HUMAI_ARGON2_P").unwrap_or(defaults.parallelism),
         }
     }
 }
@@ -258,15 +269,28 @@ pub struct MasterVault {
     status: String,
     /// When true, [`Self::unlocked`] is always treated as true.
     skip_vault: bool,
+    failed_attempts: u32,
+    next_attempt_at: Option<Instant>,
     /// Future hook: populate after successful unlock.
     pub vault: Vault,
 }
 
 impl MasterVault {
     pub fn new() -> Self {
-        let skip_vault = !ENABLE_PASSWORD_LOCK
-            || std::env::var("ARPSCI_SKIP_VAULT").unwrap_or_default() == "1";
-        let stored_hash = std::env::var("ARPSCI_MASTER_HASH")
+        let is_release = !cfg!(debug_assertions);
+        let debug_lock_enabled = parse_bool_env("HUMAI_ENABLE_PASSWORD_LOCK").unwrap_or(false);
+        let debug_skip_requested = parse_bool_env("HUMAI_SKIP_VAULT").unwrap_or(false);
+
+        // Security stance:
+        // - release: always enforce lock, ignore skip env.
+        // - debug: unlocked by default unless lock explicitly enabled.
+        let skip_vault = if is_release {
+            false
+        } else {
+            !debug_lock_enabled || debug_skip_requested
+        };
+
+        let stored_hash = std::env::var("HUMAI_MASTER_HASH")
             .ok()
             .filter(|s| !s.trim().is_empty())
             .or_else(|| {
@@ -284,6 +308,8 @@ impl MasterVault {
             unlocked: false,
             status: String::new(),
             skip_vault,
+            failed_attempts: 0,
+            next_attempt_at: None,
             vault: Vault::default(),
         }
     }
@@ -302,9 +328,20 @@ impl MasterVault {
             self.unlocked = true;
             return;
         }
+
+        if let Some(deadline) = self.next_attempt_at {
+            if Instant::now() < deadline {
+                let secs_left = deadline.saturating_duration_since(Instant::now()).as_secs();
+                self.status = format!("Too many failed attempts. Try again in {secs_left}s.");
+                self.unlocked = false;
+                return;
+            }
+            self.next_attempt_at = None;
+        }
+
         if self.stored_hash.is_empty() {
             self.status =
-                "No master hash configured. Set ARPSCI_MASTER_HASH or create runs/.master_hash."
+                "No master hash configured. Set HUMAI_MASTER_HASH or create vault/.master_hash."
                     .to_string();
             self.unlocked = false;
             return;
@@ -327,7 +364,7 @@ impl MasterVault {
         };
 
         if parsed_hash.algorithm.as_str() != "argon2id" {
-            self.status = "Stored hash is not Argon2id; regenerate runs/.master_hash with secure defaults.".to_string();
+            self.status = "Stored hash is not Argon2id; regenerate vault/.master_hash with secure defaults.".to_string();
             self.unlocked = false;
             return;
         }
@@ -339,16 +376,26 @@ impl MasterVault {
         {
             Ok(()) => {
                 self.unlocked = true;
+                self.failed_attempts = 0;
+                self.next_attempt_at = None;
+                self.master_input = SecretString::new(String::new().into_boxed_str());
                 self.status = "Unlocked.".to_string();
             }
             Err(_) => {
                 self.unlocked = false;
+                self.failed_attempts = self.failed_attempts.saturating_add(1);
+                let shift = self.failed_attempts.saturating_sub(1).min(5);
+                let backoff_secs = (1u64 << shift).min(30);
+                self.next_attempt_at = Some(Instant::now() + Duration::from_secs(backoff_secs));
+                self.master_input = SecretString::new(String::new().into_boxed_str());
                 self.status = "Wrong master password.".to_string();
             }
         }
     }
 
     pub fn lock(&mut self) {
+        // Allow explicit runtime lock in debug/dev mode even if startup skipped the vault.
+        self.skip_vault = false;
         self.unlocked = false;
         self.master_input = SecretString::new(String::new().into_boxed_str());
         self.status.clear();
@@ -356,26 +403,30 @@ impl MasterVault {
 
     /// Full-screen unlock UI (CentralPanel).
     pub fn show_unlock_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Unlock");
+
+        ui.heading("Humai Vault");
+
+        
         if self.skip_vault {
-            ui.label("Vault gate is disabled (ARPSCI_SKIP_VAULT=1).");
+            ui.label("Vault gate is disabled in debug mode.");
+            ui.label("Set HUMAI_ENABLE_PASSWORD_LOCK=1 to test lock behavior during development.");
             return;
         }
         if self.stored_hash.is_empty() {
             ui.label(self.status.clone());
             ui.label(format!(
-                "Create `{}` with one line (PHC Argon2id hash), or set ARPSCI_MASTER_HASH.",
+                "Create `{}` with one line (PHC Argon2id hash), or set HUMAI_MASTER_HASH.",
                 DEFAULT_HASH_FILE
             ));
             return;
         }
 
-        ui.label("Master password:");
+        ui.label("Enter Password:");
         let mut plain: String = self.master_input.expose_secret().to_owned();
         let resp = ui.add(
             TextEdit::singleline(&mut plain)
                 .password(true)
-                .hint_text("••••••••"),
+                .hint_text("•••••••••••••••••"),
         );
         // Always mirror the text field into `master_input`. Relying only on `changed()` is unsafe:
         // password fields can desync from `changed()` across focus/Enter/lock-retry frames.
@@ -395,9 +446,6 @@ impl MasterVault {
 
     /// Thin top strip with Lock; call from a `TopBottomPanel::top`. Returns true if user locked.
     pub fn show_lock_bar(&mut self, ui: &mut egui::Ui) -> bool {
-        if self.skip_vault {
-            return false;
-        }
         let mut clicked = false;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button("Lock").clicked() {

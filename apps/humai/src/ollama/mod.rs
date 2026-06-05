@@ -44,8 +44,8 @@ fn parse_bool_env(name: &str, default: bool) -> bool {
 impl HttpPolicy {
     pub fn from_env() -> HttpPolicy {
         HttpPolicy {
-            air_gap_enabled: parse_bool_env("ARPSCI_AIR_GAP", false),
-            allow_local_ollama: parse_bool_env("ARPSCI_ALLOW_LOCAL_OLLAMA", true),
+            air_gap_enabled: parse_bool_env("HUMAI_AIR_GAP", false),
+            allow_local_ollama: parse_bool_env("HUMAI_ALLOW_LOCAL_OLLAMA", true),
         }
     }
 }
@@ -213,7 +213,7 @@ pub async fn send_to_ollama_with_result(
     } else {
         None
     };
-    let context_window = std::env::var("ARPSCI_OLLAMA_CONTEXT_WINDOW")
+    let context_window = std::env::var("HUMAI_OLLAMA_CONTEXT_WINDOW")
         .ok()
         .and_then(|v| v.parse::<u32>().ok());
     let engine = engine::InferenceEngine::from_host(ollama_host);

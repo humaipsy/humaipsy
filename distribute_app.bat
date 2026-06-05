@@ -21,6 +21,12 @@ copy "%RELEASE_DIR%\humai.exe" "%DIST_DIR%\humai.exe" || exit /b 1
 if exist "%APP_DIR%\assets" (
     xcopy /e /i /q "%APP_DIR%\assets" "%DIST_DIR%\assets" || exit /b 1
 )
+if exist "%APP_DIR%\vault\.master_hash" (
+    if not exist "%DIST_DIR%\vault" mkdir "%DIST_DIR%\vault" || exit /b 1
+    copy "%APP_DIR%\vault\.master_hash" "%DIST_DIR%\vault\.master_hash" || exit /b 1
+) else (
+    echo WARNING: %APP_DIR%\vault\.master_hash not found. Distribution will stay locked until hash is provided.
+)
 
 echo.
 echo Distribution complete: %DIST_DIR%
