@@ -24,7 +24,6 @@ pub enum GlobalChatMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MainPanelTab {
     Overview,
-    Ollama,
     Settings,
 }
 
@@ -60,7 +59,7 @@ impl Humai {
             "Experimental condition COOP: be cooperative with the human participant. Be supportive, collaborative, and help them progress constructively while staying safe and on-topic.".to_string()
         });
         let argum_agent_prompt = std::env::var("HUMAI_ARGUM_AGENT_PROMPT").unwrap_or_else(|_| {
-            "Experimental condition ARGUM: be argumentative with the human participant. You must challenge assumptions, present counterpoints, and disagree when appropriate. Do NOT use a supportive or reassuring therapeutic style. Keep disagreement respectful, concise, and on-topic.".to_string()
+            "Experimental condition ARGUM: be argumentative with the human participant. You must challenge assumptions, present counterpoints, and disagree when appropriate. Do NOT use a supportive or reassuring therapeutic style.".to_string()
         });
 
         Self {

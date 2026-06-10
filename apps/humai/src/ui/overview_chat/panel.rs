@@ -104,7 +104,7 @@ fn condition_instruction_for_state(state: &ExperimentSessionState) -> &'static s
 
     match condition {
         "ARGUM" => {
-            "Experimental condition ARGUM: be argumentative with the human participant. You must challenge assumptions, present counterpoints, and disagree when appropriate. Do NOT use a supportive or reassuring therapeutic style. Keep disagreement respectful, concise, and on-topic."
+            "Experimental condition ARGUM: be argumentative with the human participant. You must challenge assumptions, present counterpoints, and disagree when appropriate. Do NOT use a supportive or reassuring therapeutic style."
         }
         _ => {
             "Experimental condition COOP: be cooperative with the human participant. Be supportive, collaborative, and help them progress constructively while staying safe and on-topic."

@@ -4,14 +4,14 @@ use eframe::egui;
 use std::sync::atomic::Ordering;
 
 impl Humai {
-    pub(super) fn render_ollama_settings_widgets(
+    pub(super) fn render_settings_widgets(
         &mut self,
         ui: &mut egui::Ui,
         ctx: &egui::Context,
         ui_state: &mut HumaiUiState,
     ) {
         ui.vertical(|ui| {
-            ui.label(egui::RichText::new("Ollama Settings").strong().size(16.0));
+            ui.label(egui::RichText::new("AI Settings").strong().size(16.0));
             ui.separator();
             let models = ui_state.ollama.models.lock().unwrap().clone();
             if self.selected_ollama_model.is_empty()
@@ -24,13 +24,13 @@ impl Humai {
             }
 
             ui.horizontal(|ui| {
-                ui.label("API host / URL:");
+                ui.label("Ollama API host / URL:");
                 ui.add(egui::TextEdit::singleline(&mut self.ollama_host).desired_width(300.0));
             });
 
             ui.add_space(5.0);
             ui.horizontal(|ui| {
-                ui.label("Global Ollama Model:");
+                ui.label("Ollama Model:");
                 let mut draft = ui_state.ollama.model_selection_draft.clone();
                 egui::ComboBox::from_id_salt("ollama_model_selector_global")
                     .selected_text(if draft.is_empty() {
@@ -88,62 +88,16 @@ impl Humai {
                     });
                 }
             });
-            ui.label(
-                egui::RichText::new("This model is used globally by agent and sidecar inference.")
-                    .small()
-                    .weak(),
-            );
+
             if !ui_state.ollama.model_set_status.is_empty() {
                 ui.label(egui::RichText::new(&ui_state.ollama.model_set_status).small().weak());
             }
 
-            ui.add_space(10.0);
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(egui::RichText::new("Agent").strong().size(16.0));
-                ui.separator();
-                ui.label(
-                    egui::RichText::new(
-                        "Define the condition prompts appended to the global assistant prompt for Ollama agent runs.",
-                    )
-                    .small()
-                    .weak(),
-                );
-                ui.add_space(6.0);
-
-                ui.label("COOP prompt:");
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.coop_agent_prompt)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(4),
-                );
-
-                ui.add_space(8.0);
-                ui.label("ARGUM prompt:");
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.argum_agent_prompt)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(4),
-                );
-            });
-
-            ui.add_space(10.0);
-            ui.label(egui::RichText::new("Ollama Test").strong().size(16.0));
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.label("Using global model:");
-                ui.label(
-                    if self.selected_ollama_model.trim().is_empty() {
-                        "(none selected)".to_string()
-                    } else {
-                        self.selected_ollama_model.clone()
-                    },
-                );
-            });
-            ui.add_space(5.0);
+            ui.add_space(4.0);
 
             ui.horizontal(|ui| {
-                if ui.button("Test API").clicked() {
+                ui.label("Ollama Inference Test:");
+                if ui.button("Ping Ollama").clicked() {
                     *ui_state.ollama.test_status.lock().unwrap() = "Pinging Ollama...".to_string();
                     ui_state.ollama.test_running.store(true, Ordering::Relaxed);
                     let ctx = ctx.clone();
@@ -192,11 +146,44 @@ impl Humai {
                 ui.add_space(4.0);
                 ui.label(egui::RichText::new(test_status).small().weak());
             }
-        });
-    }
 
-    pub(super) fn render_reproducibility_settings_widgets(&mut self, ui: &mut egui::Ui) {
-        ui.vertical(|ui| {
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(10.0);
+
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.set_width(ui.available_width() / 2.0);
+                ui.label(egui::RichText::new("Experimental Design Agent").strong().size(16.0));
+                ui.separator();
+                ui.label(
+                    egui::RichText::new(
+                        "Define the conditions appended to the global agent.",
+                    )
+                    .small()
+                    .weak(),
+                );
+                ui.add_space(6.0);
+
+                ui.label("Cooperative prompt:");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.coop_agent_prompt)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(4),
+                );
+
+                ui.add_space(8.0);
+                ui.label("Argumentative prompt:");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.argum_agent_prompt)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(4),
+                );
+            });
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(6.0);
+
             ui.label(egui::RichText::new("Timing and Metrics").strong().size(16.0));
             ui.separator();
             let mut metrics_changed = false;
@@ -224,18 +211,19 @@ impl Humai {
                 }
             });
             ui.label(
-                egui::RichText::new(
-                    "Default path is metrics/timings.csv.",
-                )
-                .small()
-                .weak(),
+                egui::RichText::new("Default path is metrics/timings.csv.")
+                    .small()
+                    .weak(),
             );
 
             if metrics_changed {
                 self.refresh_metrics_sink();
             }
+            
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(6.0);
 
-            ui.add_space(10.0);
             ui.label(egui::RichText::new("Theme").strong().size(16.0));
             ui.separator();
             ui.horizontal(|ui| {
@@ -270,11 +258,6 @@ impl Humai {
                         );
                     });
             });
-            ui.label(
-                egui::RichText::new("Global UI palette for the app shell.")
-                    .small()
-                    .weak(),
-            );
         });
     }
 }

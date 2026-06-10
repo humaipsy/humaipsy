@@ -31,15 +31,6 @@ impl Humai {
                         }
                         if ui
                             .selectable_label(
-                                self.active_tab == MainPanelTab::Ollama,
-                                "Ollama",
-                            )
-                            .clicked()
-                        {
-                            self.active_tab = MainPanelTab::Ollama;
-                        }
-                        if ui
-                            .selectable_label(
                                 self.active_tab == MainPanelTab::Settings,
                                 "Settings",
                             )
@@ -67,12 +58,9 @@ impl Humai {
                         MainPanelTab::Overview => {
                             crate::ui::overview_chat::render_overview_panel(self, ui);
                         }
-                        MainPanelTab::Ollama => {
-                            let ctx = ui.ctx().clone();
-                            self.render_ollama_settings_widgets(ui, &ctx, ui_state);
-                        }
                         MainPanelTab::Settings => {
-                            self.render_reproducibility_settings_widgets(ui);
+                            let ctx = ui.ctx().clone();
+                            self.render_settings_widgets(ui, &ctx, ui_state);
                         }
                     }
                 });
