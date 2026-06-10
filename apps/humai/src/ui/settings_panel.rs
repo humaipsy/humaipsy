@@ -104,7 +104,6 @@ impl Humai {
                     let handle = self.rt_handle.clone();
                     let model = self.selected_ollama_model.clone();
                     let ollama_host = self.ollama_host.clone();
-                    let app_state = self.app_state.clone();
                     let test_status = ui_state.ollama.test_status.clone();
                     let test_running = ui_state.ollama.test_running.clone();
                     handle.spawn(async move {
@@ -115,7 +114,6 @@ impl Humai {
                             } else {
                                 Some(model.as_str())
                             },
-                            app_state,
                         )
                         .await
                         {
@@ -184,14 +182,14 @@ impl Humai {
             ui.separator();
             ui.add_space(6.0);
 
-            ui.label(egui::RichText::new("Timing and Metrics").strong().size(16.0));
+            ui.label(egui::RichText::new("Experiment Recording").strong().size(16.0));
             ui.separator();
             let mut metrics_changed = false;
             ui.horizontal(|ui| {
                 if ui
                     .checkbox(
                         &mut self.metrics_config.enabled,
-                        "Enable Ollama timing metrics (CSV)",
+                        "Enable experiment CSV recording",
                     )
                     .changed()
                 {
@@ -199,10 +197,10 @@ impl Humai {
                 }
             });
             ui.horizontal(|ui| {
-                ui.label("Metrics file:");
+                ui.label("Output folder:");
                 if ui
                     .add(
-                        egui::TextEdit::singleline(&mut self.metrics_config.metrics_file)
+                        egui::TextEdit::singleline(&mut self.metrics_config.output_dir)
                             .desired_width(320.0),
                     )
                     .changed()
@@ -211,15 +209,17 @@ impl Humai {
                 }
             });
             ui.label(
-                egui::RichText::new("Default path is metrics/timings.csv.")
-                    .small()
-                    .weak(),
+                egui::RichText::new(
+                    "Experiment CSV files are written to this folder (e.g. metrics/Exp001.csv).",
+                )
+                .small()
+                .weak(),
             );
 
             if metrics_changed {
                 self.refresh_metrics_sink();
             }
-            
+
             ui.add_space(6.0);
             ui.separator();
             ui.add_space(6.0);

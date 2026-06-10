@@ -10,7 +10,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use eframe::egui;
 use egui_phosphor::regular;
 
+use crate::agent::timing_to_inference_snapshot;
 use crate::app_model::{GlobalChatMode, Humai};
+use crate::metrics::{
+    display_csv_path, ExperimentDesignSnapshot, MetricsConfig, SessionMetadata, TrialMetadata,
+};
+use crate::recording::experiment_csv::{
+    self, begin_session, begin_trial, end_experiment, end_trial, record_ai_transcript,
+    record_experiment_configured, record_human_transcript,
+};
+use crate::recording::timing::InferenceTraceContext;
 
 use super::chat::{ChatExample, ChatMessage, Room};
 use super::incoming::MessageSource;
@@ -67,7 +76,7 @@ fn total_experiment_trials() -> usize {
 }
 
 fn trial_descriptor(index: usize) -> TrialDescriptor {
-    // Sequence by blocks: [COOP, ARGUM] x 2 blocks.
+    // Sequence by conditions: [COOP, ARGUM] x trials per condition.
     // This gives trial order: COOP-1, ARGUM-1, COOP-2, ARGUM-2.
     let condition_index = index % EXP_CONDITION_NAMES.len();
     let trial_in_condition = index / EXP_CONDITION_NAMES.len();
@@ -112,6 +121,62 @@ fn condition_instruction_for_state(state: &ExperimentSessionState) -> &'static s
     }
 }
 
+fn condition_label(name: &str) -> String {
+    match name {
+        "ARGUM" => "Argum".to_string(),
+        _ => "Cooperative".to_string(),
+    }
+}
+
+fn design_snapshot(design: &HumaiExpDesign) -> ExperimentDesignSnapshot {
+    ExperimentDesignSnapshot {
+        name: design.name.clone(),
+        csv_name: design.csv_name.clone(),
+        participant_id: design.participant_id.clone(),
+        groups: design.groups,
+        conditions: design.conditions,
+        trials: design.trials,
+        trial_seconds: design.trial_seconds,
+        topic: design.topic.clone(),
+    }
+}
+
+fn trial_metadata_from_descriptor(desc: TrialDescriptor) -> TrialMetadata {
+    let condition = EXP_CONDITION_NAMES
+        .get(desc.condition_index)
+        .copied()
+        .unwrap_or("COOP");
+    TrialMetadata {
+        condition_index: desc.condition_index,
+        condition_label: condition_label(condition),
+        trial_in_condition: desc.trial_in_condition,
+        block: desc.trial_in_condition + 1,
+    }
+}
+
+fn session_metadata_from_state(state: &ExperimentSessionState) -> Option<SessionMetadata> {
+    Some(SessionMetadata {
+        experiment_id: state.experiment_id.clone()?,
+        run_id: state.run_id.clone()?,
+        trial_index: state.trial_index,
+    })
+}
+
+fn inference_trace_context(source: &str) -> InferenceTraceContext {
+    let session = EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+        .ok()
+        .map(|state| state.clone());
+    InferenceTraceContext {
+        source: source.to_string(),
+        experiment_id: session.as_ref().and_then(|s| s.experiment_id.clone()),
+        run_id: session.as_ref().and_then(|s| s.run_id.clone()),
+        turn_index: Some(experiment_csv::current_turn_index() as u32),
+        node_global_id: None,
+    }
+}
+
 fn assistant_prompt_for_current_condition(base_prompt: &str) -> String {
     let state = EXPERIMENT_SESSION
         .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
@@ -126,7 +191,7 @@ fn assistant_prompt_for_current_condition(base_prompt: &str) -> String {
     )
 }
 
-fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample) {
+fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, timed_out: bool) {
     let was_running = crate::timer::main_timer_is_running();
     let mut session = match EXPERIMENT_SESSION
         .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
@@ -152,6 +217,10 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample) {
         return;
     }
 
+    if session.running {
+        end_trial(timed_out);
+    }
+
     let next_index = session.trial_index + 1;
     if next_index >= total_experiment_trials() {
         session.running = false;
@@ -159,6 +228,7 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample) {
         session.finished_popup_open = true;
         drop(session);
         crate::timer::pause_main_timer();
+        end_experiment();
         append_message_to_chat_and_store(
             chat,
             store,
@@ -182,7 +252,15 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample) {
         .get(desc.condition_index)
         .copied()
         .unwrap_or("COOP");
+    let session_meta = session_metadata_from_state(&session);
     drop(session);
+
+    if let Some(session_meta) = session_meta {
+        begin_trial(
+            session_meta,
+            trial_metadata_from_descriptor(desc),
+        );
+    }
 
     append_message_to_chat_and_store(
         chat,
@@ -292,7 +370,7 @@ fn handle_trial_timeout(app: &Humai, store: &Store, chat: &mut ChatExample) {
         },
     );
 
-    advance_to_next_trial(app, store, chat);
+    advance_to_next_trial(app, store, chat, true);
 }
 
 fn render_trial_timeout_popup(ctx: &egui::Context) {
@@ -481,30 +559,37 @@ fn spawn_ollama_opening_question(
     let store_path = PathBuf::from("metrics/chat.sqlite");
     let ollama_host = app.ollama_host.clone();
     let assistant_prompt = assistant_prompt_for_current_condition(&app.assistant_prompt);
-    let app_state = app.app_state.clone();
     let history_size = app.conversation_history_size;
+    let trace_context =
+        inference_trace_context("overview_chat.humai_agent.opening_question");
 
     if let Ok(mut flag) = waiting.lock() {
         *flag = true;
     }
 
     app.rt_handle.spawn(async move {
-        let agent = crate::agent::HumaiAgent::new(ollama_host, model, assistant_prompt, app_state)
+        let agent = crate::agent::HumaiAgent::new(ollama_host, model, assistant_prompt)
             .with_history_size(history_size);
 
         let out = agent
-            .generate_opening_question(&participant_id, &topic)
+            .generate_opening_question(&participant_id, &topic, trace_context)
             .await;
 
         let reply = match out {
-            Ok(content) => ChatMessage {
-                content: content.trim_end().to_string(),
-                from: Some("Assistant".to_string()),
-                correlation: None,
-                source: MessageSource::Api,
-                api_auto_respond: false,
-                assistant_generation: None,
-            },
+            Ok(agent_reply) => {
+                record_ai_transcript(
+                    &agent_reply.text,
+                    timing_to_inference_snapshot(&agent_reply.timing, agent_reply.model),
+                );
+                ChatMessage {
+                    content: agent_reply.text.trim_end().to_string(),
+                    from: Some("Assistant".to_string()),
+                    correlation: None,
+                    source: MessageSource::Api,
+                    api_auto_respond: false,
+                    assistant_generation: None,
+                }
+            }
             Err(e) => ChatMessage {
                 content: format!("Ollama error while generating opening question: {e}"),
                 from: Some("System".to_string()),
@@ -612,13 +697,31 @@ fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample
     if let Some(state) = session.as_deref_mut() {
         state.running = true;
         state.configured = true;
-        state.experiment_id = Some(experiment_id);
-        state.run_id = Some(run_id);
+        state.experiment_id = Some(experiment_id.clone());
+        state.run_id = Some(run_id.clone());
         state.trial_index = 0;
         state.trial_memory_start_idx = chat.messages.len();
         state.trial_timeout_popup_open = false;
         state.finished_popup_open = false;
     }
+
+    let design_snapshot = design_snapshot(&design);
+    let trial_desc = session
+        .as_deref()
+        .map(current_trial_descriptor_from_state)
+        .unwrap_or(TrialDescriptor {
+            condition_index: 0,
+            trial_in_condition: 0,
+        });
+    begin_session(
+        design_snapshot,
+        SessionMetadata {
+            experiment_id,
+            run_id,
+            trial_index: 0,
+        },
+        trial_metadata_from_descriptor(trial_desc),
+    );
 
     // Release the lock before creating prompts that also read experiment state.
     drop(session);
@@ -646,7 +749,6 @@ pub(crate) struct HumaiExpDesign {
     pub participant_id: String,
     pub groups: u32,
     pub conditions: u32,
-    pub blocks: u32,
     pub trials: u32,
     pub trial_seconds: u32,
     pub topic: String,
@@ -661,7 +763,6 @@ impl Default for HumaiExpDesign {
             participant_id: String::new(),
             groups: 1,
             conditions: 2,
-            blocks: 2,
             trials: 2,
             trial_seconds: 120,
             topic: "Mental Health".to_string(),
@@ -925,7 +1026,7 @@ fn render_chat_columns(
             egui::vec2(side_column_width, row_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                render_right_bar(ui, chat, human_to_agent_mode, row_height);
+                render_right_bar(ui, chat, human_to_agent_mode, row_height, &app.metrics_config);
             },
         );
     });
@@ -985,7 +1086,7 @@ fn render_chat_rectangle(
                                             .on_hover_text("Move to next trial")
                                             .clicked()
                                         {
-                                            advance_to_next_trial(app, store, chat);
+                                            advance_to_next_trial(app, store, chat, false);
                                         }
 
                                         let stop_btn = egui::Button::new(
@@ -999,6 +1100,8 @@ fn render_chat_rectangle(
                                             .clicked()
                                         {
                                             crate::timer::stop_and_reset_main_timer();
+                                            end_trial(false);
+                                            end_experiment();
                                             set_experiment_running(false);
                                             if let Ok(mut state) = EXPERIMENT_SESSION
                                                 .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
@@ -1185,6 +1288,8 @@ fn render_chat_rectangle(
                             let _ = store.append_message(room_id, &user_message, &ts);
                         }
 
+                        record_human_transcript(&message_text);
+
                         let trial_memory_start_index = current_trial_memory_start_index();
                         let memory_snapshot =
                             agent_memory_from_chat(chat, trial_memory_start_index);
@@ -1196,8 +1301,9 @@ fn render_chat_rectangle(
                         let model = app.selected_ollama_model.trim().to_string();
                         let ollama_host = app.ollama_host.clone();
                         let assistant_prompt = assistant_prompt_for_current_condition(&app.assistant_prompt);
-                        let app_state = app.app_state.clone();
                         let history_size = app.conversation_history_size;
+                        let trace_context =
+                            inference_trace_context("overview_chat.humai_agent.reply");
                         if model.is_empty() {
                             let _ = tx.send(ChatMessage {
                                 content: "Please select a global Ollama model in Settings.".to_string(),
@@ -1216,19 +1322,29 @@ fn render_chat_rectangle(
                                     ollama_host,
                                     model,
                                     assistant_prompt,
-                                    app_state,
                                 )
                                 .with_history_size(history_size);
-                                let out = agent.reply_from_memory(&memory_snapshot).await;
+                                let out = agent
+                                    .reply_from_memory(&memory_snapshot, trace_context)
+                                    .await;
                                 let reply = match out {
-                                    Ok(content) => ChatMessage {
-                                        content: content.trim_end().to_string(),
-                                        from: Some("Assistant".to_string()),
-                                        correlation: None,
-                                        source: MessageSource::Api,
-                                        api_auto_respond: false,
-                                        assistant_generation: None,
-                                    },
+                                    Ok(agent_reply) => {
+                                        record_ai_transcript(
+                                            &agent_reply.text,
+                                            timing_to_inference_snapshot(
+                                                &agent_reply.timing,
+                                                agent_reply.model,
+                                            ),
+                                        );
+                                        ChatMessage {
+                                            content: agent_reply.text.trim_end().to_string(),
+                                            from: Some("Assistant".to_string()),
+                                            correlation: None,
+                                            source: MessageSource::Api,
+                                            api_auto_respond: false,
+                                            assistant_generation: None,
+                                        }
+                                    }
                                     Err(e) => ChatMessage {
                                         content: format!("Ollama error: {e}"),
                                         from: Some("System".to_string()),
@@ -1262,6 +1378,7 @@ fn render_right_bar(
     chat: &ChatExample,
     human_to_agent_mode: bool,
     row_height: f32,
+    metrics_config: &MetricsConfig,
 ) {
     ui.set_min_height(row_height);
     ui.set_height(row_height);
@@ -1298,7 +1415,7 @@ fn render_right_bar(
                     })
                     .unwrap_or("(none)");
 
-                ui.label(egui::RichText::new("Experimental Control Panel").strong().size(16.0));
+                ui.label(egui::RichText::new("Experimental Design Control Panel").strong().size(16.0));
                 ui.separator();
                 ui.label(format!("Selected room ID: {selected_room_id}"));
                 ui.label(format!("Selected room name: {selected_room_name}"));
@@ -1349,17 +1466,18 @@ fn render_right_bar(
                                             );
                                         };
 
-                                        left_row(ui, "Exp. Design".to_string());
-                                        ui.add_space(4.0);
-
-                                        left_row(ui, format!("CSV: {}", exp_snapshot.csv_name));
+                                        left_row(ui, format!(
+                                            "CSV: {}",
+                                            display_csv_path(
+                                                &design_snapshot(&exp_snapshot),
+                                                metrics_config,
+                                            )
+                                        ));
                                         ui.add_space(4.0);
                                         
                                         left_row(ui, format!("Groups: {}", exp_snapshot.groups));
                                         ui.add_space(4.0);
                                         left_row(ui, format!("Conditions: {}", exp_snapshot.conditions));
-                                        ui.add_space(4.0);
-                                        left_row(ui, format!("Blocks: {}", exp_snapshot.blocks));
                                         ui.add_space(4.0);
                                         left_row(ui, format!("Trials: {}", exp_snapshot.trials));
                                         ui.add_space(4.0);
@@ -1409,11 +1527,7 @@ fn render_right_bar(
                                         });
 
                                         ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Between Subjects (Group)");
-                                        });
-
-                                        ui.add_space(4.0);
+                                        
                                         ui.horizontal(|ui| {
                                             ui.label("Groups:");
                                             if let Ok(mut design) = exp_design.lock() {
@@ -1427,35 +1541,16 @@ fn render_right_bar(
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            ui.label("Within Subjects (Condition)");
-                                        });
-
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Coop x Argum");
-                                        });
-
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Number of Condition Blocks");
-                                        });
-
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Blocks:");
+                                            ui.label("Conditions:");
                                             if let Ok(mut design) = exp_design.lock() {
                                                 ui.add(
-                                                    egui::DragValue::new(&mut design.blocks)
+                                                    egui::DragValue::new(&mut design.conditions)
                                                         .range(1..=32)
                                                         .speed(0.05),
                                                 );
                                             }
                                         });
 
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Number of Trials per Condition");
-                                        });
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
@@ -1469,10 +1564,6 @@ fn render_right_bar(
                                             }
                                         });
 
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label("Max Duration of Trial");
-                                        });
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
@@ -1526,9 +1617,9 @@ fn render_right_bar(
                                         
                                         ui.label(
                                             egui::RichText::new(format!(
-                                                "groups={} | blocks={} | trials={} | seconds={}",
+                                                "groups={} | conditions={} | trials={} | seconds={}",
                                                 exp_snapshot.groups,
-                                                exp_snapshot.blocks,
+                                                exp_snapshot.conditions,
                                                 exp_snapshot.trials,
                                                 exp_snapshot.trial_seconds,
                                             ))
@@ -1639,6 +1730,7 @@ fn render_participant_id_modal(ctx: &egui::Context) {
                                     .lock()
                                 {
                                     design.participant_id = value;
+                                    record_experiment_configured(design_snapshot(&design));
                                 }
                                 mark_experiment_configured();
                             }

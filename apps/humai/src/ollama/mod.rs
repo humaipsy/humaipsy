@@ -1,14 +1,10 @@
 use anyhow::{Result, anyhow};
 use reqwest::Url;
 use std::net::IpAddr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
-use std::time::SystemTime;
 
-use crate::app_state::AppState;
-use crate::metrics::{InferenceTimingEvent, InferenceTraceContext};
-use crate::recording::timing::{duration_ms_ceil, duration_us, now_rfc3339_utc, EVENT_TYPE_INFERENCE_TIMING};
+use crate::recording::timing::{duration_us, InferenceTraceContext};
 
 mod client;
 mod engine;
@@ -113,7 +109,7 @@ pub fn guard_ollama_request(ollama_url: &str) -> Result<()> {
 pub const OLLAMA_STOPPED_MSG: &str = "ollama inference stopped";
 
 /// When live epoch differs from `captured_epoch`, streaming stops cooperatively (user Stop).
-pub type OllamaStopEpoch = (Arc<AtomicU64>, u64);
+pub type OllamaStopEpoch = (std::sync::Arc<AtomicU64>, u64);
 
 #[derive(Clone, Debug)]
 pub struct TokenUsage {
@@ -122,14 +118,25 @@ pub struct TokenUsage {
     pub total_token_count: u64,
 }
 
+#[derive(Clone, Debug)]
+pub struct InferenceTimingSnapshot {
+    pub duration_ms: u128,
+    pub ttft_us: Option<u128>,
+    pub input_chars: usize,
+    pub output_chars: usize,
+    pub prompt_token_count: Option<u64>,
+    pub candidates_token_count: Option<u64>,
+    pub total_token_count: Option<u64>,
+    pub source: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
 pub struct OllamaInferenceResult {
     pub model: Option<String>,
     pub response: String,
     pub usage: Option<TokenUsage>,
-}
-
-fn format_rfc3339(ts: SystemTime) -> String {
-    chrono::DateTime::<chrono::Utc>::from(ts).to_rfc3339()
+    pub timing: InferenceTimingSnapshot,
 }
 
 pub async fn fetch_ollama_models(ollama_host: &str) -> Result<Vec<String>> {
@@ -144,9 +151,8 @@ pub async fn send_to_ollama(
     num_predict: &str,
     model_override: Option<&str>,
     stop_epoch: Option<OllamaStopEpoch>,
-    app_state: Arc<AppState>,
     trace_context: InferenceTraceContext,
-) -> Result<String> {
+) -> Result<(String, InferenceTimingSnapshot)> {
     let result = send_to_ollama_with_result(
         ollama_host,
         instruction,
@@ -155,11 +161,10 @@ pub async fn send_to_ollama(
         num_predict,
         model_override,
         stop_epoch,
-        app_state,
         trace_context,
     )
     .await?;
-    Ok(result.response)
+    Ok((result.response, result.timing))
 }
 
 pub async fn send_to_ollama_with_result(
@@ -170,40 +175,13 @@ pub async fn send_to_ollama_with_result(
     num_predict: &str,
     model_override: Option<&str>,
     stop_epoch: Option<OllamaStopEpoch>,
-    app_state: Arc<AppState>,
     trace_context: InferenceTraceContext,
 ) -> Result<OllamaInferenceResult> {
-    let metrics_sink = app_state.metrics_sink();
-    let t_start_wall = SystemTime::now();
     let t_start = std::time::Instant::now();
+    let input_chars = input.chars().count();
 
     if let Some((epoch, caught)) = &stop_epoch {
         if epoch.load(Ordering::SeqCst) != *caught {
-            let t_end_wall = SystemTime::now();
-            metrics_sink.record_inference(InferenceTimingEvent {
-                event_type: EVENT_TYPE_INFERENCE_TIMING.to_string(),
-                timestamp: now_rfc3339_utc(),
-                source: trace_context.source.clone(),
-                experiment_id: trace_context.experiment_id.clone(),
-                run_id: trace_context.run_id.clone(),
-                node_global_id: trace_context.node_global_id.clone(),
-                model: model_override.map(|m| m.to_string()),
-                success: false,
-                error: Some(OLLAMA_STOPPED_MSG.to_string()),
-                t_start: format_rfc3339(t_start_wall),
-                t_first_token: None,
-                t_end: format_rfc3339(t_end_wall),
-                duration_ms: t_start.elapsed().as_millis(),
-                ttft_ms: None,
-                ttft_us: None,
-                input_chars: input.chars().count(),
-                output_chars: 0,
-                prompt_token_count: None,
-                candidates_token_count: None,
-                total_token_count: None,
-                turn_index: trace_context.turn_index,
-                prompt: Some(input.to_string()),
-            });
             return Err(anyhow::anyhow!(OLLAMA_STOPPED_MSG));
         }
     }
@@ -232,80 +210,34 @@ pub async fn send_to_ollama_with_result(
     {
         Ok(out) => out,
         Err(e) => {
-            let t_end_wall = SystemTime::now();
-            metrics_sink.record_inference(InferenceTimingEvent {
-                event_type: EVENT_TYPE_INFERENCE_TIMING.to_string(),
-                timestamp: now_rfc3339_utc(),
-                source: trace_context.source.clone(),
-                experiment_id: trace_context.experiment_id.clone(),
-                run_id: trace_context.run_id.clone(),
-                node_global_id: trace_context.node_global_id.clone(),
-                model: model_override.map(|m| m.to_string()),
-                success: false,
-                error: Some(e.to_string()),
-                t_start: format_rfc3339(t_start_wall),
-                t_first_token: None,
-                t_end: format_rfc3339(t_end_wall),
-                duration_ms: t_start.elapsed().as_millis(),
-                ttft_ms: None,
-                ttft_us: None,
-                input_chars: input.chars().count(),
-                output_chars: 0,
-                prompt_token_count: None,
-                candidates_token_count: None,
-                total_token_count: None,
-                turn_index: trace_context.turn_index,
-                prompt: Some(input.to_string()),
-            });
             return Err(e);
         }
     };
 
-    let t_end_wall = SystemTime::now();
-    let first_token_at = infer
-        .ttft
-        .and_then(|d| t_start_wall.checked_add(d))
-        .map(format_rfc3339);
     let ttft_us = infer.ttft.map(duration_us);
-    let ttft_ms = infer.ttft.map(duration_ms_ceil);
     let output_chars = infer.text.chars().count();
-    metrics_sink.record_inference(InferenceTimingEvent {
-        event_type: EVENT_TYPE_INFERENCE_TIMING.to_string(),
-        timestamp: now_rfc3339_utc(),
-        source: trace_context.source,
-        experiment_id: trace_context.experiment_id,
-        run_id: trace_context.run_id,
-        node_global_id: trace_context.node_global_id,
-        model: Some(infer.model.clone()),
-        success: true,
-        error: None,
-        t_start: format_rfc3339(t_start_wall),
-        t_first_token: first_token_at,
-        t_end: format_rfc3339(t_end_wall),
+    let timing = InferenceTimingSnapshot {
         duration_ms: t_start.elapsed().as_millis(),
-        ttft_ms,
         ttft_us,
-        input_chars: input.chars().count(),
+        input_chars,
         output_chars,
         prompt_token_count: infer.usage.as_ref().map(|u| u.prompt_token_count),
         candidates_token_count: infer.usage.as_ref().map(|u| u.candidates_token_count),
         total_token_count: infer.usage.as_ref().map(|u| u.total_token_count),
-        turn_index: trace_context.turn_index,
-        prompt: Some(input.to_string()),
-    });
+        source: trace_context.source,
+        success: true,
+        error: None,
+    };
 
     Ok(OllamaInferenceResult {
         model: Some(infer.model),
         response: infer.text,
         usage: infer.usage,
+        timing,
     })
 }
 
-pub async fn test_ollama(
-    ollama_host: &str,
-    model_override: Option<&str>,
-    app_state: Arc<AppState>,
-) -> Result<String> {
+pub async fn test_ollama(ollama_host: &str, model_override: Option<&str>) -> Result<String> {
     let result = send_to_ollama_with_result(
         ollama_host,
         "You are a helpful assistant running locally via Ollama.",
@@ -314,13 +246,9 @@ pub async fn test_ollama(
         "",
         model_override,
         None,
-        app_state,
         InferenceTraceContext {
             source: "settings.test_ollama".to_string(),
-            experiment_id: None,
-            run_id: None,
-            node_global_id: None,
-            turn_index: None,
+            ..InferenceTraceContext::default()
         },
     )
     .await?;

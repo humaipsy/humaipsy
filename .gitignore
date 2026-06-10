@@ -21,6 +21,8 @@ agents-workspace.json
 # Local code-signing configuration (contains secrets/paths)
 signing/windows-signing.env
 
+# Experiment CSV exports (per design file, e.g. metrics/Exp001.csv)
+apps/humai/metrics/*.csv
 timings.csv
 
 
@@ -37,3 +39,5 @@ docs/book/
 __pycache__/
 
 .master_hash
+
+*.csv

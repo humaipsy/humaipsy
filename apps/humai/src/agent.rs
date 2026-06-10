@@ -1,6 +1,5 @@
-use std::sync::Arc;
-
-use crate::app_state::AppState;
+use crate::metrics::InferenceSnapshot;
+use crate::ollama::InferenceTimingSnapshot;
 use crate::recording::timing::InferenceTraceContext;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,28 +14,28 @@ pub struct AgentMemoryMessage {
     pub content: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct AgentReply {
+    pub text: String,
+    pub timing: InferenceTimingSnapshot,
+    pub model: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct HumaiAgent {
     ollama_host: String,
     model: String,
     assistant_prompt: String,
-    app_state: Arc<AppState>,
     history_size: usize,
     max_sentences: usize,
 }
 
 impl HumaiAgent {
-    pub fn new(
-        ollama_host: String,
-        model: String,
-        assistant_prompt: String,
-        app_state: Arc<AppState>,
-    ) -> Self {
+    pub fn new(ollama_host: String, model: String, assistant_prompt: String) -> Self {
         Self {
             ollama_host,
             model,
             assistant_prompt,
-            app_state,
             history_size: 5,
             max_sentences: 5,
         }
@@ -51,7 +50,8 @@ impl HumaiAgent {
         &self,
         participant_id: &str,
         topic: &str,
-    ) -> Result<String, String> {
+        trace_context: InferenceTraceContext,
+    ) -> Result<AgentReply, String> {
         let instruction = format!(
             "{}\n\nYou are starting an experiment session. Ask exactly one concise, neutral opening question for the participant. Return only the question text. Maximum {} sentences.",
             self.assistant_prompt, self.max_sentences
@@ -62,7 +62,7 @@ impl HumaiAgent {
             topic.trim()
         );
 
-        let out = crate::ollama::send_to_ollama(
+        let (out, timing) = crate::ollama::send_to_ollama(
             &self.ollama_host,
             &instruction,
             &input,
@@ -70,29 +70,30 @@ impl HumaiAgent {
             "",
             Some(self.model.as_str()),
             None,
-            self.app_state.clone(),
-            InferenceTraceContext {
-                source: "overview_chat.humai_agent.opening_question".to_string(),
-                ..InferenceTraceContext::default()
-            },
+            trace_context,
         )
         .await
         .map_err(|e| e.to_string())?;
 
-        Ok(clamp_to_max_sentences(out.trim_end(), self.max_sentences))
+        Ok(AgentReply {
+            text: clamp_to_max_sentences(out.trim_end(), self.max_sentences),
+            model: Some(self.model.clone()),
+            timing,
+        })
     }
 
     pub async fn reply_from_memory(
         &self,
         memory: &[AgentMemoryMessage],
-    ) -> Result<String, String> {
+        trace_context: InferenceTraceContext,
+    ) -> Result<AgentReply, String> {
         let instruction = format!(
             "{}\n\nYou are the active intelligent agent for this conversation. Use the provided memory context to stay coherent across turns. Never exceed {} sentences in your answer.",
             self.assistant_prompt, self.max_sentences
         );
         let input = format_memory_input(memory, self.history_size);
 
-        let out = crate::ollama::send_to_ollama(
+        let (out, timing) = crate::ollama::send_to_ollama(
             &self.ollama_host,
             &instruction,
             &input,
@@ -100,16 +101,35 @@ impl HumaiAgent {
             "",
             Some(self.model.as_str()),
             None,
-            self.app_state.clone(),
-            InferenceTraceContext {
-                source: "overview_chat.humai_agent.reply".to_string(),
-                ..InferenceTraceContext::default()
-            },
+            trace_context,
         )
         .await
         .map_err(|e| e.to_string())?;
 
-        Ok(clamp_to_max_sentences(out.trim_end(), self.max_sentences))
+        Ok(AgentReply {
+            text: clamp_to_max_sentences(out.trim_end(), self.max_sentences),
+            model: Some(self.model.clone()),
+            timing,
+        })
+    }
+}
+
+pub fn timing_to_inference_snapshot(
+    timing: &InferenceTimingSnapshot,
+    model: Option<String>,
+) -> InferenceSnapshot {
+    InferenceSnapshot {
+        model,
+        duration_ms: timing.duration_ms,
+        ttft_us: timing.ttft_us,
+        input_chars: timing.input_chars,
+        output_chars: timing.output_chars,
+        prompt_token_count: timing.prompt_token_count,
+        candidates_token_count: timing.candidates_token_count,
+        total_token_count: timing.total_token_count,
+        source: timing.source.clone(),
+        success: timing.success,
+        error: timing.error.clone(),
     }
 }
 
