@@ -13,8 +13,14 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth 1 origin "${GITHUB_REF_NAME}"
+          git checkout FETCH_HEAD
 
       - name: Install system dependencies
         run: |
@@ -34,12 +40,11 @@ jobs:
             libgl1-mesa-dev
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/humai
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          source "$HOME/.cargo/env"
+          rustup show
 
       - name: Build distribution
         env:
@@ -53,9 +58,18 @@ jobs:
           sha256sum humai-linux-x86_64.tar.gz > SHA256SUMS
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/humai-linux-x86_64.tar.gz
-            dist/SHA256SUMS
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" \
+              dist/humai-linux-x86_64.tar.gz \
+              dist/SHA256SUMS \
+              --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              dist/humai-linux-x86_64.tar.gz \
+              dist/SHA256SUMS \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi
