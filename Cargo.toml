@@ -1,3 +1,4 @@
 [workspace]
 members = ["apps/humai"]
 default-members = ["apps/humai"]
+resolver = "3"

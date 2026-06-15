@@ -1,5 +1,7 @@
 target/
 
+dist/
+
 
 
 # Python platform artifacts

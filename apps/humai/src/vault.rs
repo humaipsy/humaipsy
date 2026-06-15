@@ -1,6 +1,7 @@
 //! Master-password gate (Argon2id) and a small encrypted [`Vault`] container.
 //!
-//! Configure with `HUMAI_MASTER_HASH` (PHC string) or a file at `vault/.master_hash` (first line).
+//! On first launch, the app prompts for a master password and writes `vault/.master_hash`.
+//! Later launches verify against that file, or against `HUMAI_MASTER_HASH` if set.
 //! Optional Argon2id tuning via env: `HUMAI_ARGON2_M_KIB`, `HUMAI_ARGON2_T`, `HUMAI_ARGON2_P`.
 //! In release builds, the password lock is always enforced.
 //! In debug builds, startup is unlocked by default for faster development.
@@ -72,6 +73,21 @@ pub fn hash_master_password_phc(password: &str, params: VaultKdfParams) -> anyho
         .to_string())
 }
 
+/// Hash `password` and write a one-line PHC string to `path`, creating parent dirs as needed.
+pub fn persist_master_hash(
+    path: impl AsRef<Path>,
+    password: &str,
+    params: VaultKdfParams,
+) -> anyhow::Result<String> {
+    let phc = hash_master_password_phc(password, params)?;
+    let path = path.as_ref();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, format!("{phc}\n"))?;
+    Ok(phc)
+}
+
 pub fn default_master_hash_file_path() -> PathBuf {
     PathBuf::from(DEFAULT_HASH_FILE)
 }
@@ -106,18 +122,14 @@ pub fn write_master_hash_file(path: impl AsRef<Path>) -> std::io::Result<()> {
         std::process::exit(1);
     }
 
-    let phc = hash_master_password_phc(&pw, params)
+    let phc = persist_master_hash(path, &pw, params)
         .map_err(|e| std::io::Error::other(e.to_string()))?;
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, format!("{phc}\n"))?;
 
     println!(
         "Wrote {} (keep runs/ out of version control; do not commit the password).",
         path.display()
     );
+    let _ = phc;
     Ok(())
 }
 
@@ -265,6 +277,7 @@ pub struct MasterVault {
     stored_hash: String,
     kdf_params: VaultKdfParams,
     master_input: SecretString,
+    confirm_input: SecretString,
     pub unlocked: bool,
     status: String,
     /// When true, [`Self::unlocked`] is always treated as true.
@@ -305,6 +318,7 @@ impl MasterVault {
             stored_hash,
             kdf_params: VaultKdfParams::from_env(),
             master_input: SecretString::new(String::new().into_boxed_str()),
+            confirm_input: SecretString::new(String::new().into_boxed_str()),
             unlocked: false,
             status: String::new(),
             skip_vault,
@@ -340,9 +354,6 @@ impl MasterVault {
         }
 
         if self.stored_hash.is_empty() {
-            self.status =
-                "No master hash configured. Set HUMAI_MASTER_HASH or create vault/.master_hash."
-                    .to_string();
             self.unlocked = false;
             return;
         }
@@ -393,44 +404,94 @@ impl MasterVault {
         }
     }
 
+    fn try_setup_password(&mut self) {
+        self.status.clear();
+
+        let password = self.master_input.expose_secret();
+        let confirm = self.confirm_input.expose_secret();
+
+        if password.is_empty() {
+            self.status = "Enter a master password.".to_string();
+            return;
+        }
+        if password != confirm {
+            self.status = "Passwords do not match.".to_string();
+            return;
+        }
+
+        match persist_master_hash(
+            default_master_hash_file_path(),
+            password,
+            self.kdf_params,
+        ) {
+            Ok(phc) => {
+                self.stored_hash = phc;
+                self.unlocked = true;
+                self.master_input = SecretString::new(String::new().into_boxed_str());
+                self.confirm_input = SecretString::new(String::new().into_boxed_str());
+                self.status = "Password created.".to_string();
+            }
+            Err(e) => {
+                self.unlocked = false;
+                self.status = format!("Could not save master password: {e}");
+            }
+        }
+    }
+
     pub fn lock(&mut self) {
         // Allow explicit runtime lock in debug/dev mode even if startup skipped the vault.
         self.skip_vault = false;
         self.unlocked = false;
         self.master_input = SecretString::new(String::new().into_boxed_str());
+        self.confirm_input = SecretString::new(String::new().into_boxed_str());
         self.status.clear();
+    }
+
+    fn sync_password_field(ui: &mut egui::Ui, value: &mut SecretString, hint: &str) -> egui::Response {
+        let mut plain: String = value.expose_secret().to_owned();
+        let resp = ui.add(
+            TextEdit::singleline(&mut plain)
+                .password(true)
+                .hint_text(hint),
+        );
+        *value = SecretString::new(plain.into_boxed_str());
+        resp
     }
 
     /// Full-screen unlock UI (CentralPanel).
     pub fn show_unlock_ui(&mut self, ui: &mut egui::Ui) {
-
         ui.heading("Humai Vault");
 
-        
         if self.skip_vault {
             ui.label("Vault gate is disabled in debug mode.");
             ui.label("Set HUMAI_ENABLE_PASSWORD_LOCK=1 to test lock behavior during development.");
             return;
         }
+
         if self.stored_hash.is_empty() {
-            ui.label(self.status.clone());
-            ui.label(format!(
-                "Create `{}` with one line (PHC Argon2id hash), or set HUMAI_MASTER_HASH.",
-                DEFAULT_HASH_FILE
-            ));
+            ui.label("Create a master password for this installation.");
+            ui.label("Password:");
+            let password_resp =
+                Self::sync_password_field(ui, &mut self.master_input, "••••••••••••••••");
+            ui.label("Confirm password:");
+            let confirm_resp =
+                Self::sync_password_field(ui, &mut self.confirm_input, "••••••••••••••••");
+
+            if ui.button("Create password").clicked()
+                || ((password_resp.lost_focus() || confirm_resp.lost_focus())
+                    && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+            {
+                self.try_setup_password();
+            }
+
+            if !self.status.is_empty() {
+                ui.label(egui::RichText::new(&self.status).weak());
+            }
             return;
         }
 
         ui.label("Enter Password:");
-        let mut plain: String = self.master_input.expose_secret().to_owned();
-        let resp = ui.add(
-            TextEdit::singleline(&mut plain)
-                .password(true)
-                .hint_text("•••••••••••••••••"),
-        );
-        // Always mirror the text field into `master_input`. Relying only on `changed()` is unsafe:
-        // password fields can desync from `changed()` across focus/Enter/lock-retry frames.
-        self.master_input = SecretString::new(plain.into_boxed_str());
+        let resp = Self::sync_password_field(ui, &mut self.master_input, "••••••••••••••••");
 
         if ui.button("Unlock").clicked()
             || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
@@ -441,7 +502,6 @@ impl MasterVault {
         if !self.status.is_empty() {
             ui.label(egui::RichText::new(&self.status).weak());
         }
-
     }
 
     /// Thin top strip with Lock; call from a `TopBottomPanel::top`. Returns true if user locked.
@@ -466,6 +526,23 @@ mod tests {
         assert!(params.memory_cost_kib >= 64 * 1024);
         assert!(params.time_cost >= 3);
         assert!((1..=4).contains(&params.parallelism));
+    }
+
+    #[test]
+    fn persist_master_hash_roundtrip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vault/.master_hash");
+        let params = VaultKdfParams::default();
+        let phc =
+            persist_master_hash(&path, "setup-password", params).expect("persist master hash");
+        assert!(path.is_file());
+        assert!(phc.starts_with("$argon2id$"));
+
+        let argon2 = argon2id(&params).expect("argon2");
+        let parsed = PasswordHash::new(&phc).expect("parse phc");
+        assert!(argon2
+            .verify_password(b"setup-password", &parsed)
+            .is_ok());
     }
 
     #[test]
