@@ -1,7 +1,6 @@
 target/
 
 
-Cargo.lock
 
 # Python platform artifacts
 platform/.venv/
