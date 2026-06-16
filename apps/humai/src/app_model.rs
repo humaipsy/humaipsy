@@ -24,6 +24,7 @@ pub enum GlobalChatMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MainPanelTab {
     Overview,
+    Design,
     Settings,
 }
 

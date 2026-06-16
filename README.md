@@ -10,23 +10,6 @@ Features:
 - Local and Offline-First Field Architecture
 - Statistical Analysis Friendly Data Output
 
-## Installation Windows/Linux
-
-Installation distribution.
-
-<details>
-<summary>Distribute</summary>
-<br>
-</details>
-
-## Source
-
-Hello.
-
-<details>
-<summary>Architecture</summary>
-<br>
-</details>
 
 ## Dependencies
 

@@ -13,7 +13,8 @@ use egui_phosphor::regular;
 use crate::agent::timing_to_inference_snapshot;
 use crate::app_model::{GlobalChatMode, Humai};
 use crate::metrics::{
-    display_csv_path, ExperimentDesignSnapshot, MetricsConfig, SessionMetadata, TrialMetadata,
+    display_csv_path, ExperimentDesignSnapshot, InferenceSnapshot, MetricsConfig, SessionMetadata,
+    TrialMetadata,
 };
 use crate::recording::experiment_csv::{
     self, begin_session, begin_trial, end_experiment, end_trial, record_ai_transcript,
@@ -104,7 +105,11 @@ fn experiment_status_label(state: &ExperimentSessionState) -> String {
     )
 }
 
-fn condition_instruction_for_state(state: &ExperimentSessionState) -> &'static str {
+fn condition_instruction_for_state(
+    state: &ExperimentSessionState,
+    coop_prompt: &str,
+    argum_prompt: &str,
+) -> String {
     let desc = current_trial_descriptor_from_state(state);
     let condition = EXP_CONDITION_NAMES
         .get(desc.condition_index)
@@ -112,12 +117,8 @@ fn condition_instruction_for_state(state: &ExperimentSessionState) -> &'static s
         .unwrap_or("COOP");
 
     match condition {
-        "ARGUM" => {
-            "Experimental condition ARGUM: be argumentative with the human participant. You must challenge assumptions, present counterpoints, and disagree when appropriate. Do NOT use a supportive or reassuring therapeutic style."
-        }
-        _ => {
-            "Experimental condition COOP: be cooperative with the human participant. Be supportive, collaborative, and help them progress constructively while staying safe and on-topic."
-        }
+        "ARGUM" => argum_prompt.to_string(),
+        _ => coop_prompt.to_string(),
     }
 }
 
@@ -177,7 +178,7 @@ fn inference_trace_context(source: &str) -> InferenceTraceContext {
     }
 }
 
-fn assistant_prompt_for_current_condition(base_prompt: &str) -> String {
+fn assistant_prompt_for_current_condition(app: &Humai) -> String {
     let state = EXPERIMENT_SESSION
         .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
         .lock()
@@ -186,8 +187,12 @@ fn assistant_prompt_for_current_condition(base_prompt: &str) -> String {
 
     format!(
         "{}\n\n{}",
-        base_prompt,
-        condition_instruction_for_state(&state)
+        app.assistant_prompt,
+        condition_instruction_for_state(
+            &state,
+            &app.coop_agent_prompt,
+            &app.argum_agent_prompt,
+        )
     )
 }
 
@@ -228,7 +233,26 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
         session.finished_popup_open = true;
         drop(session);
         crate::timer::pause_main_timer();
+
+        let final_question = HUMAI_EXPDESIGN
+            .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
+            .lock()
+            .map(|design| design.question.trim().to_string())
+            .unwrap_or_default();
+
+        if !final_question.is_empty() {
+            record_ai_transcript(
+                &final_question,
+                InferenceSnapshot {
+                    source: "experiment.final_question".to_string(),
+                    success: true,
+                    ..Default::default()
+                },
+            );
+        }
+
         end_experiment();
+
         append_message_to_chat_and_store(
             chat,
             store,
@@ -241,6 +265,30 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
                 assistant_generation: None,
             },
         );
+
+        if !final_question.is_empty() {
+            record_ai_transcript(
+                &final_question,
+                InferenceSnapshot {
+                    source: "experiment.final_question".to_string(),
+                    success: true,
+                    ..Default::default()
+                },
+            );
+            append_message_to_chat_and_store(
+                chat,
+                store,
+                ChatMessage {
+                    content: final_question,
+                    from: Some("Assistant".to_string()),
+                    correlation: None,
+                    source: MessageSource::Api,
+                    api_auto_respond: false,
+                    assistant_generation: None,
+                },
+            );
+        }
+
         return;
     }
 
@@ -558,7 +606,7 @@ fn spawn_ollama_opening_question(
     let selected_room = chat.selected_room.clone();
     let store_path = PathBuf::from("metrics/chat.sqlite");
     let ollama_host = app.ollama_host.clone();
-    let assistant_prompt = assistant_prompt_for_current_condition(&app.assistant_prompt);
+    let assistant_prompt = assistant_prompt_for_current_condition(app);
     let history_size = app.conversation_history_size;
     let trace_context =
         inference_trace_context("overview_chat.humai_agent.opening_question");
@@ -1008,28 +1056,28 @@ fn render_chat_columns(
     chat: &mut ChatExample,
     human_to_agent_mode: bool,
 ) {
-    let total_width = ui.available_width();
-    let chat_column_width = (total_width * 0.52).clamp(240.0, total_width);
-    let side_column_width = (total_width * 0.49).clamp(240.0, total_width);
     let row_height = ui.available_height();
+    render_chat_rectangle(app, ui, store, chat, human_to_agent_mode, row_height);
+}
 
-    ui.horizontal(|ui| {
-        ui.allocate_ui_with_layout(
-            egui::vec2(chat_column_width, row_height),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                render_chat_rectangle(app, ui, store, chat, human_to_agent_mode, row_height);
-            },
-        );
+pub(crate) fn render_design_panel(app: &mut Humai, ui: &mut egui::Ui) {
+    let chat_cell = CHAT.get_or_init(|| Mutex::new(ChatExample::new()));
+    let chat = chat_cell.lock().unwrap();
+    let human_to_agent_mode = matches!(app.chat_mode, GlobalChatMode::Enabled);
+    let metrics_config = app.metrics_config.clone();
+    render_right_bar(
+        ui,
+        app,
+        &chat,
+        human_to_agent_mode,
+        &metrics_config,
+    );
+}
 
-        ui.allocate_ui_with_layout(
-            egui::vec2(side_column_width, row_height),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                render_right_bar(ui, chat, human_to_agent_mode, row_height, &app.metrics_config);
-            },
-        );
-    });
+pub(crate) fn render_experiment_modals(ctx: &egui::Context) {
+    render_participant_id_modal(ctx);
+    render_trial_timeout_popup(ctx);
+    render_experiment_finished_popup(ctx);
 }
 
 fn render_chat_rectangle(
@@ -1300,7 +1348,7 @@ fn render_chat_rectangle(
                         let store_path = PathBuf::from("metrics/chat.sqlite");
                         let model = app.selected_ollama_model.trim().to_string();
                         let ollama_host = app.ollama_host.clone();
-                        let assistant_prompt = assistant_prompt_for_current_condition(&app.assistant_prompt);
+                        let assistant_prompt = assistant_prompt_for_current_condition(app);
                         let history_size = app.conversation_history_size;
                         let trace_context =
                             inference_trace_context("overview_chat.humai_agent.reply");
@@ -1375,28 +1423,18 @@ fn render_chat_rectangle(
 
 fn render_right_bar(
     ui: &mut egui::Ui,
+    app: &mut Humai,
     chat: &ChatExample,
     human_to_agent_mode: bool,
-    row_height: f32,
     metrics_config: &MetricsConfig,
 ) {
-    ui.set_min_height(row_height);
-    ui.set_height(row_height);
     egui::Frame::default()
         .stroke(egui::Stroke::new(
             1.0,
             ui.visuals().widgets.noninteractive.bg_stroke.color,
         ))
-        .inner_margin(egui::Margin {
-            left: 6,
-            right: 6,
-            top: 0,
-            bottom: 0,
-        })
+        .inner_margin(egui::Margin::same(6))
         .show(ui, |ui| {
-            ui.set_min_height(row_height);
-            ui.set_height(row_height);
-            ui.add_space(-1.0);
             ui.vertical(|ui| {
                 let exp_design = HUMAI_EXPDESIGN.get_or_init(|| Mutex::new(HumaiExpDesign::default()));
                 let exp_snapshot = exp_design
@@ -1428,11 +1466,12 @@ fn render_right_bar(
                 ui.separator();
                 ui.add_space(4.0);
 
-                let columns_height = (ui.available_height() - 20.0).max(0.0);
+                let columns_height = 200.0;
 
                 let total_width = ui.available_width();
-                let left_width = 120.0;
-                let right_width = 250.0;
+                let left_width = 200.0;
+                let middle_width = 300.0;
+                let agent_width = 360.0;
 
                 ui.allocate_ui_with_layout(
                     egui::vec2(total_width, columns_height),
@@ -1494,11 +1533,11 @@ fn render_right_bar(
                         );
 
                         ui.allocate_ui_with_layout(
-                            egui::vec2(right_width, columns_height),
+                            egui::vec2(middle_width, columns_height),
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
-                                ui.set_min_width(right_width);
-                                ui.set_max_width(right_width);
+                                ui.set_min_width(middle_width);
+                                ui.set_max_width(middle_width);
                                 egui::Frame::default()
                                     .stroke(egui::Stroke::new(
                                         1.0,
@@ -1506,8 +1545,8 @@ fn render_right_bar(
                                     ))
                                     .inner_margin(egui::Margin::same(6))
                                     .show(ui, |ui| {
-                                        ui.set_min_width(right_width);
-                                        ui.set_max_width(right_width);
+                                        ui.set_min_width(middle_width);
+                                        ui.set_max_width(middle_width);
                                         ui.set_min_height(columns_height);
                                         ui.set_height(columns_height);
 
@@ -1589,7 +1628,7 @@ fn render_right_bar(
                                             if let Ok(mut design) = exp_design.lock() {
                                                 ui.add(
                                                     egui::TextEdit::singleline(&mut design.topic)
-                                                        .desired_width((right_width - 24.0).max(120.0)),
+                                                        .desired_width((middle_width - 24.0).max(120.0)),
                                                 );
                                             }
                                         });
@@ -1605,7 +1644,7 @@ fn render_right_bar(
                                                 ui.add(
                                                     egui::TextEdit::singleline(&mut design.question)
                                                         .hint_text("Type final question")
-                                                        .desired_width((right_width - 24.0).max(120.0)),
+                                                        .desired_width((middle_width - 24.0).max(120.0)),
                                                 );
                                             }
                                         });
@@ -1637,14 +1676,57 @@ fn render_right_bar(
                                     });
                             },
                         );
+
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(agent_width, columns_height),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.set_min_width(agent_width);
+                                ui.set_max_width(agent_width);
+                                ui.set_min_height(columns_height);
+                                ui.set_height(columns_height);
+                                egui::Frame::group(ui.style()).show(ui, |ui| {
+                                    ui.set_min_width(agent_width);
+                                    ui.set_max_width(agent_width);
+                                    ui.set_min_height(columns_height);
+                                    ui.set_height(columns_height);
+                                    egui::ScrollArea::vertical()
+                                        .max_height(columns_height)
+                                        .show(ui, |ui| {
+                                    ui.label(egui::RichText::new("Experimental Design Agent").strong().size(16.0));
+                                    ui.separator();
+                                    ui.label(
+                                        egui::RichText::new(
+                                            "Define the conditions appended to the global agent.",
+                                        )
+                                        .small()
+                                        .weak(),
+                                    );
+                                    ui.add_space(6.0);
+
+                                    ui.label("Cooperative prompt:");
+                                    ui.add(
+                                        egui::TextEdit::multiline(&mut app.coop_agent_prompt)
+                                            .desired_width(f32::INFINITY)
+                                            .desired_rows(4),
+                                    );
+
+                                    ui.add_space(8.0);
+                                    ui.label("Argumentative prompt:");
+                                    ui.add(
+                                        egui::TextEdit::multiline(&mut app.argum_agent_prompt)
+                                            .desired_width(f32::INFINITY)
+                                            .desired_rows(4),
+                                    );
+                                    });
+                                });
+                            },
+                        );
                     },
                 );
                 
             });
         });
-    render_participant_id_modal(ui.ctx());
-    render_trial_timeout_popup(ui.ctx());
-    render_experiment_finished_popup(ui.ctx());
 }
 
 fn open_participant_id_modal() {

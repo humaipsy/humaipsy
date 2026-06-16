@@ -147,39 +147,6 @@ impl Humai {
 
             ui.add_space(10.0);
             ui.separator();
-            ui.add_space(10.0);
-
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.set_width(ui.available_width() / 2.0);
-                ui.label(egui::RichText::new("Experimental Design Agent").strong().size(16.0));
-                ui.separator();
-                ui.label(
-                    egui::RichText::new(
-                        "Define the conditions appended to the global agent.",
-                    )
-                    .small()
-                    .weak(),
-                );
-                ui.add_space(6.0);
-
-                ui.label("Cooperative prompt:");
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.coop_agent_prompt)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(4),
-                );
-
-                ui.add_space(8.0);
-                ui.label("Argumentative prompt:");
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.argum_agent_prompt)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(4),
-                );
-            });
-
-            ui.add_space(10.0);
-            ui.separator();
             ui.add_space(6.0);
 
             ui.label(egui::RichText::new("Experiment Recording").strong().size(16.0));

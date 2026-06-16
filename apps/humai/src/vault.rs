@@ -470,6 +470,7 @@ impl MasterVault {
 
         if self.stored_hash.is_empty() {
             ui.label("Create a master password for this installation.");
+            ui.add_space(6.0);
             ui.label("Password:");
             let password_resp =
                 Self::sync_password_field(ui, &mut self.master_input, "••••••••••••••••");

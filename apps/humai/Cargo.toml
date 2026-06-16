@@ -35,6 +35,9 @@ openssl = { version = "0.10", features = ["vendored"] }
 raw-window-handle = "0.6"
 windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }
 
+[target.'cfg(not(windows))'.dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+
 [target.'cfg(windows)'.build-dependencies]
 ico = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
