@@ -78,10 +78,62 @@ fn total_experiment_trials() -> usize {
     EXP_CONDITION_NAMES.len() * EXP_TRIALS_PER_CONDITION
 }
 
+fn participant_id_numeric_value(participant_id: &str) -> Option<u64> {
+    let trimmed = participant_id.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(value) = trimmed.parse::<u64>() {
+        return Some(value);
+    }
+
+    let trailing_digits = trimmed
+        .chars()
+        .rev()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    if !trailing_digits.is_empty() {
+        return trailing_digits.parse().ok();
+    }
+
+    let all_digits: String = trimmed
+        .chars()
+        .filter(|ch| ch.is_ascii_digit())
+        .collect();
+    if all_digits.is_empty() {
+        None
+    } else {
+        all_digits.parse().ok()
+    }
+}
+
+fn counterbalance_starts_with_argum(participant_id: &str) -> bool {
+    participant_id_numeric_value(participant_id)
+        .map(|value| value % 2 == 1)
+        .unwrap_or(false)
+}
+
+fn current_participant_id() -> String {
+    HUMAI_EXPDESIGN
+        .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
+        .lock()
+        .map(|design| design.participant_id.trim().to_string())
+        .unwrap_or_default()
+}
+
 fn trial_descriptor(index: usize) -> TrialDescriptor {
-    // Sequence by conditions: [COOP, ARGUM] x trials per condition.
-    // This gives trial order: COOP-1, ARGUM-1, COOP-2, ARGUM-2.
-    let condition_index = index % EXP_CONDITION_NAMES.len();
+    // Even participant IDs: COOP, ARGUM, COOP, ARGUM.
+    // Odd participant IDs: ARGUM, COOP, ARGUM, COOP.
+    let starts_with_argum = counterbalance_starts_with_argum(&current_participant_id());
+    let base_condition = index % EXP_CONDITION_NAMES.len();
+    let condition_index = if starts_with_argum {
+        (base_condition + 1) % EXP_CONDITION_NAMES.len()
+    } else {
+        base_condition
+    };
     let trial_in_condition = index / EXP_CONDITION_NAMES.len();
     TrialDescriptor {
         condition_index,
