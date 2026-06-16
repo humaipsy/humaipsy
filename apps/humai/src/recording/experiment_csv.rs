@@ -506,6 +506,9 @@ pub fn end_trial(timed_out: bool) {
 
 pub fn end_experiment() {
     if let Ok(mut state) = recorder().lock() {
+        if state.session.is_none() {
+            return;
+        }
         let row = build_row(&state, "ExperimentEnd", None, None, None, None, None, None);
         emit(&mut state, row);
         state.session = None;
