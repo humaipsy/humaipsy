@@ -514,6 +514,37 @@ pub fn end_experiment() {
     }
 }
 
+pub fn record_final_answer(content: &str) {
+    if content.trim().is_empty() {
+        return;
+    }
+    if let Ok(mut state) = recorder().lock() {
+        let row = build_row(
+            &state,
+            "FinalAnswer",
+            None,
+            None,
+            None,
+            Some(content),
+            None,
+            None,
+        );
+        emit(&mut state, row);
+    }
+}
+
+pub fn current_experiment_csv_path() -> Option<PathBuf> {
+    let state = recorder().lock().ok()?;
+    if let Some(path) = &state.active_csv_path {
+        if path.is_file() {
+            return Some(path.clone());
+        }
+    }
+    let design = state.design.as_ref()?;
+    let path = csv_path_for_design(design, &state.config.output_path());
+    path.is_file().then_some(path)
+}
+
 pub fn current_turn_index() -> usize {
     recorder()
         .lock()

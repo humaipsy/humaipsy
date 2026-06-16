@@ -13,12 +13,12 @@ use egui_phosphor::regular;
 use crate::agent::timing_to_inference_snapshot;
 use crate::app_model::{GlobalChatMode, Humai};
 use crate::metrics::{
-    display_csv_path, ExperimentDesignSnapshot, InferenceSnapshot, MetricsConfig, SessionMetadata,
+    display_csv_path, ExperimentDesignSnapshot, MetricsConfig, SessionMetadata,
     TrialMetadata,
 };
 use crate::recording::experiment_csv::{
     self, begin_session, begin_trial, end_experiment, end_trial, record_ai_transcript,
-    record_experiment_configured, record_human_transcript,
+    record_experiment_configured, record_final_answer, record_human_transcript,
 };
 use crate::recording::timing::InferenceTraceContext;
 
@@ -47,6 +47,7 @@ struct ExperimentSessionState {
     trial_index: usize,
     trial_memory_start_idx: usize,
     trial_timeout_popup_open: bool,
+    awaiting_final_answer: bool,
     finished_popup_open: bool,
 }
 
@@ -60,6 +61,7 @@ impl Default for ExperimentSessionState {
             trial_index: 0,
             trial_memory_start_idx: 0,
             trial_timeout_popup_open: false,
+            awaiting_final_answer: false,
             finished_popup_open: false,
         }
     }
@@ -95,6 +97,10 @@ fn current_trial_descriptor_from_state(state: &ExperimentSessionState) -> TrialD
 fn experiment_status_label(state: &ExperimentSessionState) -> String {
     if !state.configured {
         return "Experiment".to_string();
+    }
+
+    if state.awaiting_final_answer {
+        return "Experiment, Final Question".to_string();
     }
 
     let desc = current_trial_descriptor_from_state(state);
@@ -230,9 +236,9 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
     if next_index >= total_experiment_trials() {
         session.running = false;
         session.trial_timeout_popup_open = false;
-        session.finished_popup_open = true;
         drop(session);
         crate::timer::pause_main_timer();
+        set_experiment_running(false);
 
         let final_question = HUMAI_EXPDESIGN
             .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
@@ -240,49 +246,21 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
             .map(|design| design.question.trim().to_string())
             .unwrap_or_default();
 
-        if !final_question.is_empty() {
-            record_ai_transcript(
-                &final_question,
-                InferenceSnapshot {
-                    source: "experiment.final_question".to_string(),
-                    success: true,
-                    ..Default::default()
-                },
-            );
-        }
-
-        end_experiment();
-
-        append_message_to_chat_and_store(
-            chat,
-            store,
-            ChatMessage {
-                content: "Experiment Finished".to_string(),
-                from: Some("System".to_string()),
-                correlation: None,
-                source: MessageSource::System,
-                api_auto_respond: false,
-                assistant_generation: None,
-            },
-        );
-
-        if !final_question.is_empty() {
-            record_ai_transcript(
-                &final_question,
-                InferenceSnapshot {
-                    source: "experiment.final_question".to_string(),
-                    success: true,
-                    ..Default::default()
-                },
-            );
+        if final_question.is_empty() {
+            finalize_experiment(chat, store);
+        } else if let Ok(mut session) = EXPERIMENT_SESSION
+            .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+            .lock()
+        {
+            session.awaiting_final_answer = true;
             append_message_to_chat_and_store(
                 chat,
                 store,
                 ChatMessage {
                     content: final_question,
-                    from: Some("Assistant".to_string()),
+                    from: Some("System".to_string()),
                     correlation: None,
-                    source: MessageSource::Api,
+                    source: MessageSource::System,
                     api_auto_respond: false,
                     assistant_generation: None,
                 },
@@ -464,6 +442,58 @@ fn render_trial_timeout_popup(ctx: &egui::Context) {
     }
 }
 
+fn awaiting_final_answer() -> bool {
+    EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+        .map(|state| state.awaiting_final_answer)
+        .unwrap_or(false)
+}
+
+fn finalize_experiment(chat: &mut ChatExample, store: &Store) {
+    end_experiment();
+    append_message_to_chat_and_store(
+        chat,
+        store,
+        ChatMessage {
+            content: "Experiment Finished".to_string(),
+            from: Some("System".to_string()),
+            correlation: None,
+            source: MessageSource::System,
+            api_auto_respond: false,
+            assistant_generation: None,
+        },
+    );
+    if let Ok(mut state) = EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+    {
+        state.awaiting_final_answer = false;
+        state.finished_popup_open = true;
+    }
+}
+
+fn submit_final_answer(chat: &mut ChatExample, store: &Store, answer: &str) {
+    record_final_answer(answer);
+    finalize_experiment(chat, store);
+}
+
+fn copy_experiment_csv_to_desktop() -> Result<PathBuf, String> {
+    let source = experiment_csv::current_experiment_csv_path()
+        .ok_or_else(|| "No experiment CSV file found.".to_string())?;
+    let home = std::env::var("HOME").map_err(|_| "HOME is not set.".to_string())?;
+    let desktop_dir = PathBuf::from(home).join("Desktop");
+    std::fs::create_dir_all(&desktop_dir)
+        .map_err(|err| format!("Failed to create Desktop folder: {err}"))?;
+    let file_name = source
+        .file_name()
+        .ok_or_else(|| "Invalid experiment CSV path.".to_string())?;
+    let destination = desktop_dir.join(file_name);
+    std::fs::copy(&source, &destination)
+        .map_err(|err| format!("Failed to copy CSV to Desktop: {err}"))?;
+    Ok(destination)
+}
+
 fn render_experiment_finished_popup(ctx: &egui::Context) {
     let mut open = EXPERIMENT_SESSION
         .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
@@ -479,26 +509,54 @@ fn render_experiment_finished_popup(ctx: &egui::Context) {
     crate::timer::pause_main_timer();
 
     let mut close_clicked = false;
+    let mut download_clicked = false;
+    static FINISHED_POPUP_STATUS: OnceLock<Mutex<String>> = OnceLock::new();
+    let status = FINISHED_POPUP_STATUS.get_or_init(|| Mutex::new(String::new()));
+
     egui::Window::new("Experiment Finished")
         .collapsible(false)
         .resizable(false)
         .movable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .fixed_size(egui::vec2(320.0, 120.0))
+        .fixed_size(egui::vec2(380.0, 180.0))
         .open(&mut open)
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(12.0);
-                ui.label("Experiment Finished");
+                ui.label("All trials are complete.");
+                ui.label("Save your experiment CSV to Desktop if needed.");
                 ui.add_space(12.0);
-                if ui.button("OK").clicked() {
-                    close_clicked = true;
+                ui.horizontal(|ui| {
+                    if ui.button("Save to Desktop").clicked() {
+                        download_clicked = true;
+                    }
+                    if ui.button("Close").clicked() {
+                        close_clicked = true;
+                    }
+                });
+                if let Ok(status) = status.lock() {
+                    if !status.is_empty() {
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new(status.as_str()).small().weak());
+                    }
                 }
             });
         });
 
+    if download_clicked {
+        if let Ok(mut popup_status) = status.lock() {
+            *popup_status = match copy_experiment_csv_to_desktop() {
+                Ok(path) => format!("Saved to {}", path.display()),
+                Err(err) => err,
+            };
+        }
+    }
+
     if close_clicked {
         open = false;
+        if let Ok(mut popup_status) = status.lock() {
+            popup_status.clear();
+        }
     }
 
     if let Ok(mut state) = EXPERIMENT_SESSION
@@ -673,10 +731,10 @@ fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample
         .lock()
         .ok();
 
-    if let Some(state) = session.as_deref_mut()
-        && state.running
-    {
-        return;
+    if let Some(state) = session.as_deref_mut() {
+        if state.running || state.awaiting_final_answer {
+            return;
+        }
     }
 
     if design.participant_id.trim().is_empty() {
@@ -750,6 +808,7 @@ fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample
         state.trial_index = 0;
         state.trial_memory_start_idx = chat.messages.len();
         state.trial_timeout_popup_open = false;
+        state.awaiting_final_answer = false;
         state.finished_popup_open = false;
     }
 
@@ -1128,9 +1187,10 @@ fn render_chat_rectangle(
                                 |ui| {
                                     ui.label(egui::RichText::new(status_label).strong());
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        let trial_controls_enabled = !awaiting_final_answer();
                                         let next_btn = egui::Button::new(">>").small();
                                         if ui
-                                            .add(next_btn)
+                                            .add_enabled(trial_controls_enabled, next_btn)
                                             .on_hover_text("Move to next trial")
                                             .clicked()
                                         {
@@ -1143,7 +1203,7 @@ fn render_chat_rectangle(
                                         )
                                         .small();
                                         if ui
-                                            .add(stop_btn)
+                                            .add_enabled(trial_controls_enabled, stop_btn)
                                             .on_hover_text("Stop timer and reset to 00:00:00")
                                             .clicked()
                                         {
@@ -1158,6 +1218,7 @@ fn render_chat_rectangle(
                                                 state.trial_index = 0;
                                                 state.trial_memory_start_idx = 0;
                                                 state.trial_timeout_popup_open = false;
+                                                state.awaiting_final_answer = false;
                                                 state.finished_popup_open = false;
                                             }
                                         }
@@ -1168,7 +1229,10 @@ fn render_chat_rectangle(
                                         )
                                         .small();
                                         if ui
-                                            .add_enabled(crate::timer::main_timer_is_running(), pause_btn)
+                                            .add_enabled(
+                                                trial_controls_enabled && crate::timer::main_timer_is_running(),
+                                                pause_btn,
+                                            )
                                             .on_hover_text("Pause timer")
                                             .clicked()
                                         {
@@ -1181,7 +1245,10 @@ fn render_chat_rectangle(
                                         )
                                         .small();
                                         if ui
-                                            .add_enabled(!crate::timer::main_timer_is_running(), play_btn)
+                                            .add_enabled(
+                                                trial_controls_enabled && !crate::timer::main_timer_is_running(),
+                                                play_btn,
+                                            )
                                             .on_hover_text("Start timer")
                                             .clicked()
                                         {
@@ -1299,14 +1366,18 @@ fn render_chat_rectangle(
             
 
 
-            ui.add_enabled_ui(human_to_agent_mode, |ui| {
+            ui.add_enabled_ui(human_to_agent_mode || awaiting_final_answer(), |ui| {
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
                     let input_width = (ui.available_width() - 72.0).max(220.0);
+                    let hint = if awaiting_final_answer() {
+                        "Answer the final question"
+                    } else {
+                        "Type a message"
+                    };
                     let response = ui.add_sized(
                         egui::vec2(input_width, input_row_height),
-                        egui::TextEdit::singleline(&mut chat.input_text)
-                            .hint_text("Type a message"),
+                        egui::TextEdit::singleline(&mut chat.input_text).hint_text(hint),
                     );
                     let send_clicked = ui
                         .add_sized(
@@ -1336,6 +1407,9 @@ fn render_chat_rectangle(
                             let _ = store.append_message(room_id, &user_message, &ts);
                         }
 
+                        if awaiting_final_answer() {
+                            submit_final_answer(chat, store, &message_text);
+                        } else {
                         record_human_transcript(&message_text);
 
                         let trial_memory_start_index = current_trial_memory_start_index();
@@ -1414,6 +1488,7 @@ fn render_chat_rectangle(
                                 }
                             });
                         }
+                        }
                     }
                 });
                 ui.add_space(8.0);
@@ -1466,7 +1541,7 @@ fn render_right_bar(
                 ui.separator();
                 ui.add_space(4.0);
 
-                let columns_height = 200.0;
+                let columns_height = 300.0;
 
                 let total_width = ui.available_width();
                 let left_width = 200.0;
