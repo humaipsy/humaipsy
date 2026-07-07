@@ -31,26 +31,19 @@ impl Default for OllamaUiState {
 	}
 }
 
+#[derive(Default)]
 pub(crate) struct HumaiUiState {
 	pub(crate) ollama: OllamaUiState,
 }
 
-impl Default for HumaiUiState {
-	fn default() -> Self {
-		Self {
-			ollama: OllamaUiState::default(),
-		}
-	}
-}
-
-fn load_first_font_bytes(candidates: &[&str]) -> Option<Vec<u8>> {
-	for path in candidates {
-		if let Ok(bytes) = std::fs::read(path) {
-			return Some(bytes);
-		}
-	}
-	None
-}
+/// Bundled so emoji in Ollama responses render identically on Windows and Linux,
+/// instead of depending on OS-specific font files that may not be installed.
+/// egui's text renderer only supports single-color glyph outlines (no COLR/CBDT
+/// color tables), so this is the monochrome "Noto Emoji" family, not "Noto Color
+/// Emoji" — glyphs are tinted with the surrounding text color rather than shown
+/// in full color, but every standard emoji renders as its actual pictograph
+/// instead of a missing-glyph box. License: SIL OFL 1.1, see assets/NotoEmoji-OFL.txt.
+const EMOJI_FONT_BYTES: &[u8] = include_bytes!("../../assets/NotoEmoji-Regular.ttf");
 
 fn prepare_shell(
 	ctx: &egui::Context,
@@ -79,54 +72,16 @@ fn prepare_shell(
 		let mut fonts = ctx.fonts(|f| f.definitions().clone());
 		egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
 
-		let mut appended_fallbacks: Vec<String> = Vec::new();
-		let emoji_color_candidates = [
-			"/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
-			"/usr/share/fonts/noto/NotoColorEmoji.ttf",
-			"/usr/share/fonts/opentype/noto/NotoColorEmoji.ttf",
-			"/usr/local/share/fonts/NotoColorEmoji.ttf",
-		];
-		if let Some(bytes) = load_first_font_bytes(&emoji_color_candidates) {
-			let name = "emoji-fallback-color".to_string();
-			fonts
-				.font_data
-				.insert(name.clone(), egui::FontData::from_owned(bytes).into());
-			appended_fallbacks.push(name);
-		}
-
-		let emoji_text_candidates = [
-			"/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf",
-			"/usr/share/fonts/truetype/noto/NotoEmoji-VariableFont_wght.ttf",
-			"/usr/share/fonts/noto/NotoEmoji-Regular.ttf",
-			"/usr/local/share/fonts/NotoEmoji-Regular.ttf",
-		];
-		if let Some(bytes) = load_first_font_bytes(&emoji_text_candidates) {
-			let name = "emoji-fallback-text".to_string();
-			fonts
-				.font_data
-				.insert(name.clone(), egui::FontData::from_owned(bytes).into());
-			appended_fallbacks.push(name);
-		}
-
-		let symbol_candidates = [
-			"/usr/share/fonts/truetype/ancient-scripts/Symbola_hint.ttf",
-			"/usr/share/fonts/truetype/ancient-scripts/Symbola.ttf",
-			"/usr/share/fonts/truetype/unifont/unifont.ttf",
-			"/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-		];
-		if let Some(bytes) = load_first_font_bytes(&symbol_candidates) {
-			let name = "emoji-fallback-symbols".to_string();
-			fonts
-				.font_data
-				.insert(name.clone(), egui::FontData::from_owned(bytes).into());
-			appended_fallbacks.push(name);
-		}
-
+		let emoji_font_name = "emoji-fallback".to_string();
+		fonts.font_data.insert(
+			emoji_font_name.clone(),
+			egui::FontData::from_static(EMOJI_FONT_BYTES).into(),
+		);
 		if let Some(proportional) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-			proportional.extend(appended_fallbacks.iter().cloned());
+			proportional.push(emoji_font_name.clone());
 		}
 		if let Some(monospace) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-			monospace.extend(appended_fallbacks);
+			monospace.push(emoji_font_name);
 		}
 		ctx.set_fonts(fonts);
 		*phosphor_fonts_installed = true;
@@ -210,5 +165,54 @@ impl eframe::App for HumaiApp {
 				self.humai.render_main_panel(ui, &mut self.ui_state);
 			});
 		});
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	const SAMPLE_EMOJI: &str = "😀🚀❤👍🎉🤔";
+
+	#[test]
+	fn default_egui_fonts_are_missing_emoji_glyphs() {
+		// Establishes the baseline this fix addresses: egui's stock fonts (used
+		// before `prepare_shell` runs) don't cover Unicode emoji at all, so
+		// without our bundled fallback these would render as missing-glyph boxes.
+		let ctx = egui::Context::default();
+		let mut has_emoji = false;
+		let _ = ctx.run(Default::default(), |ctx| {
+			has_emoji = ctx.fonts_mut(|f| f.has_glyphs(&egui::FontId::default(), SAMPLE_EMOJI));
+		});
+		assert!(!has_emoji, "test fixture assumption changed: stock egui fonts now cover emoji");
+	}
+
+	#[test]
+	fn bundled_emoji_font_covers_common_emoji_after_prepare_shell() {
+		let ctx = egui::Context::default();
+		let mut last_theme = None;
+		let mut installed = false;
+
+		// `Context::set_fonts` (called inside `prepare_shell`) only queues the new
+		// font definitions; they're applied at the *next* pass's `begin_pass`. So
+		// this takes two passes: one to install the fonts, one to observe them.
+		let _ = ctx.run(Default::default(), |ctx| {
+			prepare_shell(
+				ctx,
+				crate::app_model::CatppuccinTheme::Latte,
+				&mut last_theme,
+				&mut installed,
+			);
+		});
+		assert!(installed);
+
+		let mut has_emoji = false;
+		let _ = ctx.run(Default::default(), |ctx| {
+			has_emoji = ctx.fonts_mut(|f| f.has_glyphs(&egui::FontId::default(), SAMPLE_EMOJI));
+		});
+		assert!(
+			has_emoji,
+			"bundled NotoEmoji fallback should cover common emoji on every platform"
+		);
 	}
 }
