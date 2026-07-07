@@ -125,14 +125,40 @@ pub fn configure_design(design: ExperimentDesignSnapshot) {
     }
 }
 
-pub fn csv_path_for_design(design: &ExperimentDesignSnapshot, output_dir: &Path) -> PathBuf {
-    let file_name = design.csv_name.trim();
-    let file_name = if file_name.is_empty() {
-        format!("{}.csv", design.name.trim())
-    } else if file_name.ends_with(".csv") {
-        file_name.to_string()
+/// Reduces `raw` to a single safe path component: strips path separators (`/`
+/// and `\`, regardless of host OS, since a design could be authored on one
+/// platform and exported on another), `:` (Windows drive-prefix character), and
+/// control characters, and trims leading `.` so `..`/`.` can't be used to
+/// escape `output_dir`. `design.name`/`csv_name` are free-text UI fields —
+/// this is the only place their value becomes a filesystem path, so sanitize
+/// here rather than trying to catch every UI entry point.
+fn sanitize_file_stem(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| {
+            if c == '/' || c == '\\' || c == ':' || c.is_control() {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_start_matches('.').trim();
+    if trimmed.is_empty() {
+        "experiment".to_string()
     } else {
-        format!("{file_name}.csv")
+        trimmed.to_string()
+    }
+}
+
+pub fn csv_path_for_design(design: &ExperimentDesignSnapshot, output_dir: &Path) -> PathBuf {
+    let raw = design.csv_name.trim();
+    let raw = if raw.is_empty() { design.name.trim() } else { raw };
+    let safe = sanitize_file_stem(raw);
+    let file_name = if safe.ends_with(".csv") {
+        safe
+    } else {
+        format!("{safe}.csv")
     };
     output_dir.join(file_name)
 }
@@ -572,6 +598,58 @@ mod tests {
         let design = sample_design();
         let path = csv_path_for_design(&design, Path::new("metrics"));
         assert_eq!(path, Path::new("metrics/Exp001.csv"));
+    }
+
+    #[test]
+    fn csv_path_rejects_parent_dir_traversal() {
+        let mut design = sample_design();
+        design.csv_name = "../../../../etc/passwd".to_string();
+        let path = csv_path_for_design(&design, Path::new("metrics"));
+        assert_single_component_under(&path, Path::new("metrics"));
+    }
+
+    /// The invariant that actually matters: the sanitized filename is exactly
+    /// one path component appended to `output_dir` — no `/`/`\` smuggled a
+    /// directory segment through. A literal ".." *inside* a filename (with no
+    /// separator around it) is harmless and not worth rejecting.
+    fn assert_single_component_under(path: &Path, output_dir: &Path) {
+        assert!(
+            path.starts_with(output_dir),
+            "sanitized path escaped output_dir: {}",
+            path.display()
+        );
+        let extra_components = path.components().count() - output_dir.components().count();
+        assert_eq!(
+            extra_components, 1,
+            "sanitized filename smuggled extra path components: {}",
+            path.display()
+        );
+    }
+
+    #[test]
+    fn csv_path_rejects_unix_absolute_path() {
+        let mut design = sample_design();
+        design.csv_name = "/etc/passwd".to_string();
+        let path = csv_path_for_design(&design, Path::new("metrics"));
+        assert_single_component_under(&path, Path::new("metrics"));
+    }
+
+    #[test]
+    fn csv_path_rejects_windows_absolute_path() {
+        let mut design = sample_design();
+        design.csv_name = r"C:\Windows\System32\config".to_string();
+        let path = csv_path_for_design(&design, Path::new("metrics"));
+        assert_single_component_under(&path, Path::new("metrics"));
+        assert!(!path.to_string_lossy().contains(':'));
+    }
+
+    #[test]
+    fn csv_path_falls_back_to_default_name_when_sanitized_to_empty() {
+        let mut design = sample_design();
+        design.csv_name = "...".to_string();
+        design.name = String::new();
+        let path = csv_path_for_design(&design, Path::new("metrics"));
+        assert_eq!(path, Path::new("metrics/experiment.csv"));
     }
 
     #[test]

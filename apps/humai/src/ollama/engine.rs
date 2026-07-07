@@ -6,6 +6,7 @@ use anyhow::{Result, anyhow};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 
+use crate::sync_ext::MutexExt;
 use super::{OLLAMA_STOPPED_MSG, OllamaStopEpoch, TokenUsage, client};
 
 #[derive(Clone)]
@@ -78,13 +79,21 @@ impl InferenceEngine {
         static CACHE: OnceLock<Mutex<HashMap<String, Arc<InferenceEngine>>>> = OnceLock::new();
         let host = client::normalize_ollama_host(ollama_host);
         let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut guard = cache.lock().unwrap();
+        let mut guard = cache.lock_recover();
         if let Some(existing) = guard.get(&host) {
             return existing.clone();
         }
         let engine = Arc::new(Self {
             host: host.clone(),
-            client: reqwest::Client::new(),
+            // No overall timeout: a legitimate generation can stream for
+            // minutes. connect_timeout still fails fast if the host is
+            // unreachable, and the outer timeout is a generous safety net
+            // against a connection that goes silent forever after accepting.
+            client: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(600))
+                .build()
+                .unwrap_or_default(),
         });
         guard.insert(host, engine.clone());
         engine

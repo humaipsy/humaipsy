@@ -75,6 +75,7 @@ impl Store {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path)?;
+        restrict_to_owner(path)?;
         conn.busy_timeout(BUSY_TIMEOUT)?;
         // WAL: readers don't block writers/each other; NORMAL sync is the
         // recommended, still-durable pairing with WAL (only risks losing the
@@ -256,6 +257,21 @@ impl Store {
     }
 }
 
+/// Restricts a file to owner-only read/write (`0600`) on Unix, where the
+/// default umask otherwise leaves it world-readable (`0644`) — letting any
+/// other local user on a shared machine read the full chat transcript
+/// history. No-op on Windows, where per-user profile ACLs already isolate this.
+#[cfg(unix)]
+fn restrict_to_owner(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &Path) -> io::Result<()> {
+    Ok(())
+}
+
 fn touch_conversation_conn(conn: &Connection, id: &str) -> Result<(), StoreError> {
     // Touch parent conversation so list sorting reflects message-level updates/deletions.
     let now = audit::now_rfc3339();
@@ -284,6 +300,24 @@ mod tests {
             .query_row("PRAGMA journal_mode", [], |r| r.get(0))
             .expect("read journal_mode");
         assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_restricts_db_file_permissions_to_owner() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("chat.sqlite");
+        let _store = Store::open(&db_path).expect("open store");
+
+        let mode = std::fs::metadata(&db_path).expect("metadata").permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "chat.sqlite should be owner-only read/write, got {:o}",
+            mode & 0o777
+        );
     }
 
     #[test]

@@ -84,7 +84,24 @@ pub fn persist_master_hash(
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(path, format!("{phc}\n"))?;
+    restrict_to_owner(path)?;
     Ok(phc)
+}
+
+/// Restricts a file to owner-only read/write (`0600`) on Unix, where the
+/// default umask otherwise leaves it world-readable (`0644`) — letting any
+/// other local user read the master-password hash and offline-brute-force
+/// it. No-op on Windows, where per-user profile ACLs already isolate this.
+#[cfg(unix)]
+fn restrict_to_owner(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &Path) -> anyhow::Result<()> {
+    Ok(())
 }
 
 pub fn default_master_hash_file_path() -> PathBuf {
@@ -502,6 +519,25 @@ mod tests {
         assert!(argon2
             .verify_password(b"setup-password", &parsed)
             .is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn persist_master_hash_restricts_permissions_to_owner() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vault/.master_hash");
+        persist_master_hash(&path, "setup-password", VaultKdfParams::default())
+            .expect("persist master hash");
+
+        let mode = std::fs::metadata(&path).expect("metadata").permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "master hash file should be owner-only read/write, got {:o}",
+            mode & 0o777
+        );
     }
 
     #[test]

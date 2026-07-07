@@ -1,4 +1,5 @@
 use crate::metrics::MetricsConfig;
+use crate::sync_ext::RwLockExt;
 use std::sync::RwLock;
 
 struct AppStateInner {
@@ -18,12 +19,12 @@ impl AppState {
     }
 
     pub fn metrics_config(&self) -> MetricsConfig {
-        self.inner.read().unwrap().metrics_config.clone()
+        self.inner.read_recover().metrics_config.clone()
     }
 
     pub fn update_metrics_config(&self, metrics_config: MetricsConfig) {
         crate::recording::experiment_csv::update_config(metrics_config.clone());
-        let mut guard = self.inner.write().unwrap();
+        let mut guard = self.inner.write_recover();
         guard.metrics_config = metrics_config;
     }
 }

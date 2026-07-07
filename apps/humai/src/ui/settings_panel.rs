@@ -1,4 +1,5 @@
 use crate::app_model::{CatppuccinTheme, Humai};
+use crate::sync_ext::MutexExt;
 use crate::ui::HumaiUiState;
 use eframe::egui;
 use std::sync::atomic::Ordering;
@@ -13,7 +14,7 @@ impl Humai {
         ui.vertical(|ui| {
             ui.label(egui::RichText::new("AI Settings").strong().size(16.0));
             ui.separator();
-            let models = ui_state.ollama.models.lock().unwrap().clone();
+            let models = ui_state.ollama.models.lock_recover().clone();
             if self.selected_ollama_model.is_empty()
                 && let Some(first) = models.first()
             {
@@ -66,13 +67,13 @@ impl Humai {
                     }
                 }
 
-                let loading = *ui_state.ollama.models_loading.lock().unwrap();
+                let loading = *ui_state.ollama.models_loading.lock_recover();
                 if ui
                     .button(if loading { "Loading" } else { "Refresh" })
                     .clicked()
                     && !loading
                 {
-                    *ui_state.ollama.models_loading.lock().unwrap() = true;
+                    *ui_state.ollama.models_loading.lock_recover() = true;
                     let models_arc = ui_state.ollama.models.clone();
                     let loading_arc = ui_state.ollama.models_loading.clone();
                     let ctx = ctx.clone();
@@ -82,8 +83,8 @@ impl Humai {
                         let models = crate::ollama::fetch_ollama_models(&ollama_host)
                             .await
                             .unwrap_or_default();
-                        *models_arc.lock().unwrap() = models;
-                        *loading_arc.lock().unwrap() = false;
+                        *models_arc.lock_recover() = models;
+                        *loading_arc.lock_recover() = false;
                         ctx.request_repaint();
                     });
                 }
@@ -98,7 +99,7 @@ impl Humai {
             ui.horizontal(|ui| {
                 ui.label("Ollama Inference Test:");
                 if ui.button("Ping Ollama").clicked() {
-                    *ui_state.ollama.test_status.lock().unwrap() = "Pinging Ollama...".to_string();
+                    *ui_state.ollama.test_status.lock_recover() = "Pinging Ollama...".to_string();
                     ui_state.ollama.test_running.store(true, Ordering::Relaxed);
                     let ctx = ctx.clone();
                     let handle = self.rt_handle.clone();
@@ -118,11 +119,11 @@ impl Humai {
                         .await
                         {
                             Ok(_) => {
-                                *test_status.lock().unwrap() =
+                                *test_status.lock_recover() =
                                     "Ollama API test succeeded.".to_string();
                             }
                             Err(e) => {
-                                *test_status.lock().unwrap() =
+                                *test_status.lock_recover() =
                                     format!("Ollama API test failed: {e}");
                             }
                         }
@@ -139,7 +140,7 @@ impl Humai {
                 });
             }
 
-            let test_status = ui_state.ollama.test_status.lock().unwrap().clone();
+            let test_status = ui_state.ollama.test_status.lock_recover().clone();
             if !test_status.is_empty() {
                 ui.add_space(4.0);
                 ui.label(egui::RichText::new(test_status).small().weak());

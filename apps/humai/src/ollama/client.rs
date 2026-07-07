@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use serde::Deserialize;
 
@@ -28,7 +30,13 @@ pub(crate) async fn fetch_models(ollama_host: &str) -> Result<Vec<String>> {
     let url = std::env::var("OLLAMA_TAGS_URL")
         .unwrap_or_else(|_| format!("{}/api/tags", normalize_ollama_host(ollama_host)));
     crate::ollama::guard_ollama_request(&url)?;
-    let client = reqwest::Client::new();
+    // Listing models is a quick, non-streaming request — bound it tightly so
+    // an unreachable/hung host doesn't leave the Settings panel stuck loading.
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(20))
+        .build()
+        .unwrap_or_default();
     let response = client.get(url).send().await?.error_for_status()?;
     let tags = response.json::<OllamaTagsResponse>().await?;
     let mut models: Vec<String> = tags.models.into_iter().map(|m| m.name).collect();

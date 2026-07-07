@@ -13,6 +13,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::recording::timing::now_rfc3339_utc;
+use crate::sync_ext::MutexExt;
 
 pub const EVENTS_FILE: &str = "events.jsonl";
 pub const SUMMARY_FILE: &str = "summary.json";
@@ -159,7 +160,7 @@ impl EventLedger {
             payload,
         };
         let line = serde_json::to_string(&envelope).context("serialize ledger event")?;
-        let mut g = self.state.lock().unwrap();
+        let mut g = self.state.lock_recover();
         writeln!(g.writer, "{}", line).context("write ledger line")?;
         g.writer.flush().ok();
         *g.counts.entry(event_type.to_string()).or_insert(0) += 1;
@@ -196,7 +197,7 @@ impl EventLedger {
         err: Option<&str>,
     ) -> Result<u64> {
         let ok = err.is_none() && http_status.map(|s| s < 400).unwrap_or(false);
-        let mut g = self.state.lock().unwrap();
+        let mut g = self.state.lock_recover();
         if ok {
             g.transport_ok += 1;
         } else {
@@ -263,7 +264,7 @@ impl EventLedger {
             None
         };
 
-        let g = self.state.lock().unwrap();
+        let g = self.state.lock_recover();
         let total_events: u64 = g.counts.values().sum();
         let summary = RunSummary {
             bundle_version: BUNDLE_VERSION.to_string(),
@@ -287,7 +288,7 @@ impl EventLedger {
     }
 
     pub fn flush(&self) -> Result<()> {
-        let mut g = self.state.lock().unwrap();
+        let mut g = self.state.lock_recover();
         g.writer.flush().context("flush ledger")?;
         Ok(())
     }
