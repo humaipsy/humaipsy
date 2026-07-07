@@ -2,3 +2,8 @@
 members = ["apps/humai"]
 default-members = ["apps/humai"]
 resolver = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

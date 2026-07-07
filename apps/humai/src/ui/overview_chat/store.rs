@@ -3,7 +3,8 @@ mod schema;
 
 use std::io;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
+use std::time::Duration;
 
 use rusqlite::{params, Connection};
 
@@ -60,6 +61,10 @@ pub struct Store {
     conn: Mutex<Connection>,
 }
 
+/// How long a connection will retry against a locked database (e.g. a brief
+/// external lock from an AV scanner or a backup tool) before giving up.
+const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
         let path = path.as_ref();
@@ -70,6 +75,12 @@ impl Store {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path)?;
+        conn.busy_timeout(BUSY_TIMEOUT)?;
+        // WAL: readers don't block writers/each other; NORMAL sync is the
+        // recommended, still-durable pairing with WAL (only risks losing the
+        // last commit on an OS crash, not on an app crash).
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
         // Always run idempotent schema bootstrap so older DBs get missing columns.
         schema::create_tables(&conn)?;
         let ver: i32 = conn
@@ -81,10 +92,16 @@ impl Store {
         Ok(Self { conn: Mutex::new(conn) })
     }
 
+    /// Locks the connection, recovering it if a previous panic poisoned the mutex
+    /// rather than letting that panic cascade into every subsequent DB call.
+    fn conn(&self) -> MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     pub fn create_conversation(&self) -> Result<String, StoreError> {
         let id = audit::new_id();
         let now = audit::now_rfc3339();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         conn.execute(
             r#"INSERT INTO conversations (id, name, created_at, updated_at)
                VALUES (?1, '', ?2, ?3)"#,
@@ -94,13 +111,13 @@ impl Store {
     }
 
     pub fn delete_conversation(&self, id: &str) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])?;
         Ok(())
     }
 
     pub fn list_conversations(&self, limit: usize) -> Result<Vec<ConversationSummary>, StoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT id, name FROM conversations ORDER BY updated_at DESC LIMIT ?1",
         )?;
@@ -116,7 +133,7 @@ impl Store {
     }
 
     pub fn rename_conversation(&self, id: &str, new_name: &str) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         conn.execute(
             "UPDATE conversations SET name = ?2, updated_at = ?3 WHERE id = ?1",
             params![id, new_name, audit::now_rfc3339()],
@@ -131,8 +148,12 @@ impl Store {
             .as_ref()
             .map(serde_json::to_string)
             .transpose()?;
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
+        let mut conn = self.conn();
+        // All three writes must land together, or none should: a crash between
+        // them previously could leave a message row without its generation row,
+        // or a stale conversation.updated_at.
+        let tx = conn.transaction()?;
+        tx.execute(
             r#"INSERT INTO messages (
                 conversation_id, content, from_label, source, api_auto_respond,
                 display_timestamp, correlation_json
@@ -147,25 +168,26 @@ impl Store {
                 correlation_json,
             ],
         )?;
-        let mid = conn.last_insert_rowid();
+        let mid = tx.last_insert_rowid();
 
         if let Some(ref g) = msg.assistant_generation {
-            conn.execute(
+            tx.execute(
                 "INSERT INTO generations (message_id, model, num_predict) VALUES (?1, ?2, ?3)",
                 params![mid, &g.model, g.num_predict],
             )?;
         }
 
         let now = audit::now_rfc3339();
-        conn.execute(
+        tx.execute(
             "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
             params![&now, conversation_id],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
     pub fn delete_messages_for_conversation(&self, conversation_id: &str) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         conn.execute(
             "DELETE FROM messages WHERE conversation_id = ?1",
             params![conversation_id],
@@ -178,7 +200,7 @@ impl Store {
         &self,
         conversation_id: &str,
     ) -> Result<(Vec<ChatMessage>, Vec<String>), StoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         let mut stmt = conn.prepare(
             r#"SELECT m.id, m.content, m.from_label, m.source, m.api_auto_respond,
                       m.display_timestamp, m.correlation_json,
@@ -242,4 +264,69 @@ fn touch_conversation_conn(conn: &Connection, id: &str) -> Result<(), StoreError
         params![&now, id],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn open_temp_store() -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path().join("chat.sqlite")).expect("open store");
+        (dir, store)
+    }
+
+    #[test]
+    fn open_enables_wal_and_busy_timeout() {
+        let (_dir, store) = open_temp_store();
+        let conn = store.conn();
+        let journal_mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .expect("read journal_mode");
+        assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+    }
+
+    #[test]
+    fn append_message_persists_message_and_generation_atomically() {
+        let (_dir, store) = open_temp_store();
+        let conversation_id = store.create_conversation().expect("create conversation");
+
+        let msg = ChatMessage {
+            content: "hello".to_string(),
+            from: Some("Human".to_string()),
+            correlation: None,
+            source: MessageSource::Human,
+            api_auto_respond: false,
+            assistant_generation: Some(AssistantGeneration {
+                model: "test-model".to_string(),
+                num_predict: Some(64),
+            }),
+        };
+        store
+            .append_message(&conversation_id, &msg, "2026-01-01T00:00:00Z")
+            .expect("append message");
+
+        let (messages, _timestamps) = store.load_messages(&conversation_id).expect("load messages");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "hello");
+        let generation = messages[0]
+            .assistant_generation
+            .as_ref()
+            .expect("generation row should be present alongside its message");
+        assert_eq!(generation.model, "test-model");
+    }
+
+    #[test]
+    fn conn_recovers_from_a_poisoned_mutex_instead_of_panicking() {
+        let (_dir, store) = open_temp_store();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = store.conn();
+            panic!("simulated panic while holding the connection lock");
+        }));
+        assert!(result.is_err());
+
+        // A naive `.lock().unwrap()` would panic here too, cascading the failure
+        // into every subsequent call; `Store::conn` must recover instead.
+        assert!(store.create_conversation().is_ok());
+    }
 }
