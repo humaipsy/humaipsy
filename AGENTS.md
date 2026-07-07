@@ -27,13 +27,17 @@ apps/humai/                # the only workspace member — the actual app
     app_model.rs              # `Humai` struct: top-level in-memory app state
     app_state.rs               # `AppState`: shared, lockable runtime config (metrics)
     agent.rs                  # `HumaiAgent`: prompt construction + calls into ollama::
-    vault.rs                  # master-password gate (Argon2id) + encrypted Vault blob
+    vault.rs                  # master-password gate (Argon2id) + encrypted Vault blob —
+                                #   pure logic, no egui/UI dependency (rendering lives in
+                                #   ui/vault_panel.rs; keep it that way, see below)
     timer.rs                  # trial countdown timer used by the experiment UI
     window_icon.rs             # platform-split: Win32 SendMessage icons vs egui IconData
     ollama/                   # Ollama HTTP client, chat engine, model discovery
     recording/                # experiment_csv (per-trial rows), ledger, audit, timing, metrics
-    ui/                        # egui panels: settings, design, overview chat, etc.
+    ui/                        # egui panels: settings, design, overview chat, vault unlock UI
       overview_chat/            # chat UI + SQLite-backed message store (rusqlite, "chat.sqlite")
+      vault_panel.rs            # renders MasterVault; the only file that may import egui
+                                #   *and* crate::vault together
   assets/                    # window/topbar icon PNGs (source of truth; .ico is generated)
   vault/.master_hash          # gitignored — local Argon2id hash file, created on first run
   metrics/                    # gitignored except structure — CSV exports + chat.sqlite land here
@@ -155,6 +159,12 @@ first launch — this is expected, not a bug).
 - KDF tuning (`HUMAI_ARGON2_M_KIB`, `HUMAI_ARGON2_T`, `HUMAI_ARGON2_P`) and the
   ChaCha20-Poly1305 vault blob logic are in `apps/humai/src/vault.rs`; see the module
   doc comment at the top of that file for the full env-var list.
+- `vault.rs` must not depend on `egui`/`eframe`. It's crypto and state (`MasterVault`,
+  `Vault`, KDF params); rendering lives in `ui/vault_panel.rs`, which talks to it only
+  through `pub(crate)` accessors (`is_skip_vault`, `needs_password_setup`, `status`,
+  `master_input_mut`, `confirm_input_mut`, `try_unlock`, `try_setup_password`). If you
+  need the UI to observe new state, add an accessor rather than making the fields
+  `pub` or pulling `egui` back into `vault.rs`.
 
 ## Ollama integration
 

@@ -12,7 +12,6 @@ use argon2::password_hash::rand_core::{OsRng, RngCore};
 use argon2::{Algorithm, Argon2, Params, PasswordHash, PasswordVerifier, Version};
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use eframe::egui::{self, TextEdit};
 use hkdf::Hkdf;
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
@@ -342,7 +341,7 @@ impl MasterVault {
         self.skip_vault || !self.stored_hash.is_empty()
     }
 
-    fn try_unlock(&mut self) {
+    pub(crate) fn try_unlock(&mut self) {
         self.status.clear();
         if self.skip_vault {
             self.unlocked = true;
@@ -410,7 +409,7 @@ impl MasterVault {
         }
     }
 
-    fn try_setup_password(&mut self) {
+    pub(crate) fn try_setup_password(&mut self) {
         self.status.clear();
 
         let password = self.master_input.expose_secret();
@@ -453,73 +452,26 @@ impl MasterVault {
         self.status.clear();
     }
 
-    fn sync_password_field(ui: &mut egui::Ui, value: &mut SecretString, hint: &str) -> egui::Response {
-        let mut plain: String = value.expose_secret().to_owned();
-        let resp = ui.add(
-            TextEdit::singleline(&mut plain)
-                .password(true)
-                .hint_text(hint),
-        );
-        *value = SecretString::new(plain.into_boxed_str());
-        resp
+    /// Whether the vault gate is disabled (debug-mode default; see module docs).
+    pub(crate) fn is_skip_vault(&self) -> bool {
+        self.skip_vault
     }
 
-    /// Full-screen unlock UI (CentralPanel).
-    pub fn show_unlock_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Humai Vault");
-
-        if self.skip_vault {
-            ui.label("Vault gate is disabled in debug mode.");
-            ui.label("Set HUMAI_ENABLE_PASSWORD_LOCK=1 to test lock behavior during development.");
-            return;
-        }
-
-        if self.stored_hash.is_empty() {
-            ui.label("Create a master password for this installation.");
-            ui.add_space(6.0);
-            ui.label("Password:");
-            let password_resp =
-                Self::sync_password_field(ui, &mut self.master_input, "••••••••••••••••");
-            ui.label("Confirm password:");
-            let confirm_resp =
-                Self::sync_password_field(ui, &mut self.confirm_input, "••••••••••••••••");
-
-            if ui.button("Create password").clicked()
-                || ((password_resp.lost_focus() || confirm_resp.lost_focus())
-                    && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-            {
-                self.try_setup_password();
-            }
-
-            if !self.status.is_empty() {
-                ui.label(egui::RichText::new(&self.status).weak());
-            }
-            return;
-        }
-
-        ui.label("Enter Password:");
-        let resp = Self::sync_password_field(ui, &mut self.master_input, "••••••••••••••••");
-
-        if ui.button("Unlock").clicked()
-            || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-        {
-            self.try_unlock();
-        }
-
-        if !self.status.is_empty() {
-            ui.label(egui::RichText::new(&self.status).weak());
-        }
+    /// Whether no master password has been configured yet, i.e. first-run setup is needed.
+    pub(crate) fn needs_password_setup(&self) -> bool {
+        self.stored_hash.is_empty()
     }
 
-    /// Thin top strip with Lock; call from a `TopBottomPanel::top`. Returns true if user locked.
-    pub fn show_lock_bar(&mut self, ui: &mut egui::Ui) -> bool {
-        let mut clicked = false;
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("Lock").clicked() {
-                clicked = true;
-            }
-        });
-        clicked
+    pub(crate) fn status(&self) -> &str {
+        &self.status
+    }
+
+    pub(crate) fn master_input_mut(&mut self) -> &mut SecretString {
+        &mut self.master_input
+    }
+
+    pub(crate) fn confirm_input_mut(&mut self) -> &mut SecretString {
+        &mut self.confirm_input
     }
 }
 
