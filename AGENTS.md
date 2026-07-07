@@ -43,8 +43,6 @@ apps/humai/                # the only workspace member — the actual app
   metrics/                    # gitignored except structure — CSV exports + chat.sqlite land here
 distribute_app.sh / .bat    # build release + stage a standalone dist/ folder (see below)
 run_app.sh / .bat           # `cargo clean && cargo run` — quick dev loop
-scripts/sign_windows_release.ps1  # optional Authenticode signing, invoked by distribute_app.bat
-signing/windows-signing.env.example  # copy to windows-signing.env (gitignored) to enable signing
 .github/workflows/ci.yml               # runs on every push to main + every PR: check/test/clippy on Linux + Windows
 .github/workflows/release-linux.yml   # tag-triggered Linux release build + GitHub Release upload
 .github/workflows/release-windows.yml # tag-triggered Windows release build + GitHub Release upload
@@ -94,9 +92,9 @@ This app must build and behave the same on Windows and Linux. Concretely:
   release binary, stage it into a dist folder with `assets/` and (if present)
   `vault/.master_hash`, and respect a `HUMAI_DIST_DIR` env var override. If you change
   what one script stages or how it names things, make the equivalent change in the
-  other. Windows additionally supports Authenticode signing
-  (`scripts/sign_windows_release.ps1`), which has no Linux equivalent — that's fine,
-  don't try to add code-signing to the Linux script.
+  other. Neither binary is code-signed — the Windows build will trigger a SmartScreen
+  "unknown publisher" warning; that's a known, accepted state, not a bug to silently
+  work around. Don't add signing scripts/CI steps unless explicitly asked.
 - **Line endings are enforced via `.gitattributes`**: `*.sh` is forced to LF, `*.bat`/
   `*.ps1` to CRLF, regardless of a contributor's local `core.autocrlf`. If you add new
   shell or batch scripts, make sure `.gitattributes` covers them — a `.sh` file
