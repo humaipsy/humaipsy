@@ -8,6 +8,7 @@ use tokio::runtime::Handle;
 mod panel_render;
 mod settings_panel;
 mod overview_chat;
+mod vault_panel;
 
 pub(crate) struct OllamaUiState {
 	pub(crate) models: Arc<Mutex<Vec<String>>>,
@@ -146,14 +147,14 @@ impl eframe::App for HumaiApp {
 			egui::CentralPanel::default().show(ctx, |ui| {
 				ui.vertical_centered(|ui| {
 					ui.add_space(40.0);
-					self.vault.show_unlock_ui(ui);
+					vault_panel::show_unlock_ui(&mut self.vault, ui);
 				});
 			});
 			return;
 		}
 
 		egui::TopBottomPanel::top("master_vault_lock_bar").show(ctx, |ui| {
-			if self.vault.show_lock_bar(ui) {
+			if vault_panel::show_lock_bar(ui) {
 				self.vault.lock();
 			}
 		});
