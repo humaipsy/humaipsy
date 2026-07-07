@@ -53,9 +53,10 @@ impl AuditHandle {
     }
 
     pub fn append_json_line(&self, record: &AuditRecord) -> io::Result<()> {
-        let mut guard = self.writer.lock().map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, format!("audit mutex poisoned: {e}"))
-        })?;
+        let mut guard = self
+            .writer
+            .lock()
+            .map_err(|e| io::Error::other(format!("audit mutex poisoned: {e}")))?;
         if let Some(w) = guard.as_mut() {
             serde_json::to_writer(&mut *w, record)?;
             w.write_all(b"\n")?;

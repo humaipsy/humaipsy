@@ -5,6 +5,7 @@ set "ROOT_DIR=%~dp0"
 set "APP_DIR=%ROOT_DIR%apps\humai"
 set "RELEASE_DIR=%APP_DIR%\target\release"
 set "DIST_DIR=%USERPROFILE%\Desktop\humai"
+if defined HUMAI_DIST_DIR set "DIST_DIR=%HUMAI_DIST_DIR%"
 set "SIGN_CONFIG=%ROOT_DIR%signing\windows-signing.env"
 set "SIGN_SCRIPT=%ROOT_DIR%scripts\sign_windows_release.ps1"
 

@@ -31,7 +31,12 @@ if [[ -d "$APP_DIR/assets" ]]; then
   cp -a "$APP_DIR/assets" "$DIST_DIR/assets"
 fi
 
-echo "NOTE: First launch prompts for a master password in the app."
+if [[ -f "$APP_DIR/vault/.master_hash" ]]; then
+  mkdir -p "$DIST_DIR/vault"
+  cp "$APP_DIR/vault/.master_hash" "$DIST_DIR/vault/.master_hash"
+else
+  echo "WARNING: $APP_DIR/vault/.master_hash not found. Distribution will stay locked until hash is provided."
+fi
 
 echo
 echo "Distribution complete: $DIST_DIR"

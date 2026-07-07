@@ -175,12 +175,11 @@ impl ChatExample {
                             )
                             .on_hover_text("Clear messages in the current room")
                             .clicked()
+                            && let Some(room_id) = self.selected_room.as_ref()
                         {
-                            if let Some(room_id) = self.selected_room.as_ref() {
-                                let _ = store.delete_messages_for_conversation(room_id);
-                                self.messages.clear();
-                                self.message_timestamps.clear();
-                            }
+                            let _ = store.delete_messages_for_conversation(room_id);
+                            self.messages.clear();
+                            self.message_timestamps.clear();
                         }
 
                         if ui

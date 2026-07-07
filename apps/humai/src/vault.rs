@@ -288,6 +288,12 @@ pub struct MasterVault {
     pub vault: Vault,
 }
 
+impl Default for MasterVault {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MasterVault {
     pub fn new() -> Self {
         let is_release = !cfg!(debug_assertions);

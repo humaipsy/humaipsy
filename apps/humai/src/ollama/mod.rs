@@ -143,6 +143,7 @@ pub async fn fetch_ollama_models(ollama_host: &str) -> Result<Vec<String>> {
     client::fetch_models(ollama_host).await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn send_to_ollama(
     ollama_host: &str,
     instruction: &str,
@@ -167,6 +168,7 @@ pub async fn send_to_ollama(
     Ok((result.response, result.timing))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn send_to_ollama_with_result(
     ollama_host: &str,
     instruction: &str,
@@ -180,10 +182,10 @@ pub async fn send_to_ollama_with_result(
     let t_start = std::time::Instant::now();
     let input_chars = input.chars().count();
 
-    if let Some((epoch, caught)) = &stop_epoch {
-        if epoch.load(Ordering::SeqCst) != *caught {
-            return Err(anyhow::anyhow!(OLLAMA_STOPPED_MSG));
-        }
+    if let Some((epoch, caught)) = &stop_epoch
+        && epoch.load(Ordering::SeqCst) != *caught
+    {
+        return Err(anyhow::anyhow!(OLLAMA_STOPPED_MSG));
     }
 
     let generation_limit = if limit_token {

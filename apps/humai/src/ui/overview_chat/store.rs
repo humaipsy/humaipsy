@@ -69,7 +69,7 @@ impl Store {
         {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(&path)?;
+        let conn = Connection::open(path)?;
         // Always run idempotent schema bootstrap so older DBs get missing columns.
         schema::create_tables(&conn)?;
         let ver: i32 = conn

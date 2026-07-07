@@ -2,6 +2,10 @@ target/
 
 dist/
 
+# Only the workspace-root Cargo.lock is tracked; member crates must not
+# accumulate their own (can happen if cargo is invoked outside the workspace).
+apps/humai/Cargo.lock
+
 
 
 # Python platform artifacts

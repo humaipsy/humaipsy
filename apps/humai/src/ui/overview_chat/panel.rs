@@ -38,7 +38,7 @@ static GLOBAL_INPUT_MODAL: OnceLock<Mutex<InputModalState>> = OnceLock::new();
 const EXP_CONDITION_NAMES: [&str; 2] = ["COOP", "ARGUM"];
 const EXP_TRIALS_PER_CONDITION: usize = 2;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct ExperimentSessionState {
     configured: bool,
     running: bool,
@@ -50,23 +50,6 @@ struct ExperimentSessionState {
     awaiting_final_answer: bool,
     finished_popup_open: bool,
     experiment_complete: bool,
-}
-
-impl Default for ExperimentSessionState {
-    fn default() -> Self {
-        Self {
-            configured: false,
-            running: false,
-            experiment_id: None,
-            run_id: None,
-            trial_index: 0,
-            trial_memory_start_idx: 0,
-            trial_timeout_popup_open: false,
-            awaiting_final_answer: false,
-            finished_popup_open: false,
-            experiment_complete: false,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -573,7 +556,11 @@ fn submit_final_answer(chat: &mut ChatExample, store: &Store, answer: &str) {
 fn copy_experiment_csv_to_desktop() -> Result<PathBuf, String> {
     let source = experiment_csv::current_experiment_csv_path()
         .ok_or_else(|| "No experiment CSV file found.".to_string())?;
-    let home = std::env::var("HOME").map_err(|_| "HOME is not set.".to_string())?;
+    // Windows sets USERPROFILE (not HOME); fall back to it so the Desktop
+    // copy works the same way it does on Linux/macOS.
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "Could not determine home directory (HOME/USERPROFILE not set).".to_string())?;
     let desktop_dir = PathBuf::from(home).join("Desktop");
     std::fs::create_dir_all(&desktop_dir)
         .map_err(|err| format!("Failed to create Desktop folder: {err}"))?;
@@ -626,22 +613,22 @@ fn render_experiment_finished_popup(ctx: &egui::Context) {
                         close_clicked = true;
                     }
                 });
-                if let Ok(status) = status.lock() {
-                    if !status.is_empty() {
-                        ui.add_space(8.0);
-                        ui.label(egui::RichText::new(status.as_str()).small().weak());
-                    }
+                if let Ok(status) = status.lock()
+                    && !status.is_empty()
+                {
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new(status.as_str()).small().weak());
                 }
             });
         });
 
-    if download_clicked {
-        if let Ok(mut popup_status) = status.lock() {
-            *popup_status = match copy_experiment_csv_to_desktop() {
-                Ok(path) => format!("Saved to {}", path.display()),
-                Err(err) => err,
-            };
-        }
+    if download_clicked
+        && let Ok(mut popup_status) = status.lock()
+    {
+        *popup_status = match copy_experiment_csv_to_desktop() {
+            Ok(path) => format!("Saved to {}", path.display()),
+            Err(err) => err,
+        };
     }
 
     if close_clicked {
@@ -823,10 +810,10 @@ fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample
         .lock()
         .ok();
 
-    if let Some(state) = session.as_deref_mut() {
-        if state.running || state.awaiting_final_answer {
-            return;
-        }
+    if let Some(state) = session.as_deref_mut()
+        && (state.running || state.awaiting_final_answer)
+    {
+        return;
     }
 
     if design.participant_id.trim().is_empty() {
@@ -1794,7 +1781,7 @@ fn render_right_bar(
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            ui.label("Topic:​");
+                                            ui.label("Topic:");
                                         });
 
                                         ui.add_space(4.0);
@@ -1809,7 +1796,7 @@ fn render_right_bar(
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            ui.label("Final Question to Participant​");
+                                            ui.label("Final Question to Participant");
                                         });
 
                                         ui.add_space(4.0);

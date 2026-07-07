@@ -96,6 +96,7 @@ pub struct InferenceSnapshot {
     pub error: Option<String>,
 }
 
+#[derive(Default)]
 struct RecorderState {
     config: MetricsConfig,
     design: Option<ExperimentDesignSnapshot>,
@@ -104,20 +105,6 @@ struct RecorderState {
     turn_index: usize,
     writer: Option<BufWriter<std::fs::File>>,
     active_csv_path: Option<PathBuf>,
-}
-
-impl Default for RecorderState {
-    fn default() -> Self {
-        Self {
-            config: MetricsConfig::default(),
-            design: None,
-            session: None,
-            trial: None,
-            turn_index: 0,
-            writer: None,
-            active_csv_path: None,
-        }
-    }
 }
 
 static RECORDER: OnceLock<Mutex<RecorderState>> = OnceLock::new();
@@ -257,11 +244,11 @@ fn ensure_writer(state: &mut RecorderState, csv_path: &Path) -> Result<()> {
         return Ok(());
     }
 
-    if let Some(parent) = csv_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("create metrics dir {}", parent.display()))?;
-        }
+    if let Some(parent) = csv_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create metrics dir {}", parent.display()))?;
     }
 
     let file = OpenOptions::new()
@@ -328,6 +315,7 @@ fn base_metadata(state: &RecorderState) -> (ExperimentDesignSnapshot, Option<Ses
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_row(
     state: &RecorderState,
     event: &str,
@@ -538,10 +526,10 @@ pub fn record_final_answer(content: &str) {
 
 pub fn current_experiment_csv_path() -> Option<PathBuf> {
     let state = recorder().lock().ok()?;
-    if let Some(path) = &state.active_csv_path {
-        if path.is_file() {
-            return Some(path.clone());
-        }
+    if let Some(path) = &state.active_csv_path
+        && path.is_file()
+    {
+        return Some(path.clone());
     }
     let design = state.design.as_ref()?;
     let path = csv_path_for_design(design, &state.config.output_path());

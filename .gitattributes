@@ -1,0 +1,10 @@
+# Normalize line endings so Linux and Windows contributors can't corrupt
+# each other's scripts regardless of local core.autocrlf settings.
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+*.png binary
+*.ico binary

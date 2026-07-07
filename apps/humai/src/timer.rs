@@ -47,10 +47,10 @@ impl MainTimerState {
     }
 
     fn elapsed(&self) -> Duration {
-        if self.running {
-            if let Some(started_at) = self.started_at {
-                return self.accumulated.saturating_add(started_at.elapsed());
-            }
+        if self.running
+            && let Some(started_at) = self.started_at
+        {
+            return self.accumulated.saturating_add(started_at.elapsed());
         }
         self.accumulated
     }
