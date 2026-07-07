@@ -41,13 +41,17 @@ distribute_app.sh / .bat    # build release + stage a standalone dist/ folder (s
 run_app.sh / .bat           # `cargo clean && cargo run` — quick dev loop
 scripts/sign_windows_release.ps1  # optional Authenticode signing, invoked by distribute_app.bat
 signing/windows-signing.env.example  # copy to windows-signing.env (gitignored) to enable signing
-.github/workflows/release-linux.yml # tag-triggered Linux release build + GitHub Release upload
+.github/workflows/release-linux.yml   # tag-triggered Linux release build + GitHub Release upload
+.github/workflows/release-windows.yml # tag-triggered Windows release build + GitHub Release upload
 ```
 
-There is currently **no Windows release workflow** — only Linux is automated via CI.
-Windows distribution today is manual, via `distribute_app.bat`. Do not add a Windows
-release workflow or change the `dist/` naming scheme (e.g. `humai-0.1.2-win`,
-`humai-0.1.2-ubu`) without being asked — that's an intentional pending decision.
+Both release workflows fire on a `v*` tag push and upload to the GitHub Release for
+that tag: `release-linux.yml` produces `humai-<version>-ubu.tar.gz`,
+`release-windows.yml` produces `humai-<version>-win.zip` (`<version>` is the tag with
+its leading `v` stripped, e.g. tag `v0.1.2` → `humai-0.1.2-ubu`/`humai-0.1.2-win`). Keep
+these two workflows in parity the same way `distribute_app.sh`/`.bat` are kept in
+parity — they both wrap the corresponding distribute script with a versioned
+`HUMAI_DIST_DIR`, then archive and upload it.
 
 ## Cross-platform rules (read this before touching platform-sensitive code)
 
@@ -175,8 +179,9 @@ first launch — this is expected, not a bug).
 ## Things to leave alone unless explicitly asked
 
 - Do not merge branches or push to `main` without being asked.
-- Do not add a Windows release CI workflow or introduce the
-  `humai-<version>-win` / `humai-<version>-ubu` dist-naming scheme — pending a decision.
+- Do not push a `v*` tag or run `gh release create`/`gh release upload` yourself —
+  that cuts a real, public GitHub Release and is the user's call, not something to do
+  as a side effect of an unrelated change.
 - Do not run a blanket `cargo fmt` across the whole tree. The codebase predates a
   consistent formatting pass; a full reformat would bury real changes in noise. Match
   the surrounding file's existing style when editing, and only fix formatting in lines

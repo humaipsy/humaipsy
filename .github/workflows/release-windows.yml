@@ -1,0 +1,62 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth 1 origin "${GITHUB_REF_NAME}"
+          git checkout FETCH_HEAD
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Set release artifact name
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "ARTIFACT_NAME=humai-${version}-win" >> "$GITHUB_ENV"
+
+      - name: Build distribution
+        shell: cmd
+        env:
+          HUMAI_DIST_DIR: ${{ github.workspace }}\dist\${{ env.ARTIFACT_NAME }}
+        run: |
+          echo. | call distribute_app.bat
+
+      - name: Package release archive
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/$env:ARTIFACT_NAME/*" -DestinationPath "dist/$env:ARTIFACT_NAME.zip"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" \
+              "dist/${ARTIFACT_NAME}.zip" \
+              --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              "dist/${ARTIFACT_NAME}.zip" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi

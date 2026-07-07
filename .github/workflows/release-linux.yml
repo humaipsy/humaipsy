@@ -46,15 +46,20 @@ jobs:
           source "$HOME/.cargo/env"
           rustup show
 
+      - name: Set release artifact name
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "ARTIFACT_NAME=humai-${version}-ubu" >> "$GITHUB_ENV"
+
       - name: Build distribution
         env:
-          HUMAI_DIST_DIR: ${{ github.workspace }}/dist/humai-linux-x86_64
+          HUMAI_DIST_DIR: ${{ github.workspace }}/dist/${{ env.ARTIFACT_NAME }}
         run: ./distribute_app.sh
 
       - name: Package release archive
         run: |
           cd dist
-          tar czf humai-linux-x86_64.tar.gz -C humai-linux-x86_64 .
+          tar czf "${ARTIFACT_NAME}.tar.gz" -C "${ARTIFACT_NAME}" .
 
       - name: Publish GitHub Release
         env:
@@ -62,11 +67,11 @@ jobs:
         run: |
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" \
-              dist/humai-linux-x86_64.tar.gz \
+              "dist/${ARTIFACT_NAME}.tar.gz" \
               --clobber
           else
             gh release create "${GITHUB_REF_NAME}" \
-              dist/humai-linux-x86_64.tar.gz \
+              "dist/${ARTIFACT_NAME}.tar.gz" \
               --title "${GITHUB_REF_NAME}" \
               --generate-notes
           fi
