@@ -3,6 +3,7 @@ name = "humai"
 description = "humai software"
 version = "0.1.3"
 edition = "2024"
+rust-version = "1.85"
 default-run = "humai"
 build = "build.rs"
 

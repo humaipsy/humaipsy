@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libx11-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libxcursor-dev \
+            libasound2-dev \
+            libegl1-mesa-dev \
+            libgl1-mesa-dev
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: cargo check
+        working-directory: apps/humai
+        run: cargo check --all-targets
+
+      - name: cargo test
+        working-directory: apps/humai
+        run: cargo test --all-targets
+
+      - name: cargo clippy
+        working-directory: apps/humai
+        run: cargo clippy --all-targets -- -D warnings

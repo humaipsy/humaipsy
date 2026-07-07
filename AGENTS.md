@@ -45,6 +45,7 @@ distribute_app.sh / .bat    # build release + stage a standalone dist/ folder (s
 run_app.sh / .bat           # `cargo clean && cargo run` — quick dev loop
 scripts/sign_windows_release.ps1  # optional Authenticode signing, invoked by distribute_app.bat
 signing/windows-signing.env.example  # copy to windows-signing.env (gitignored) to enable signing
+.github/workflows/ci.yml               # runs on every push to main + every PR: check/test/clippy on Linux + Windows
 .github/workflows/release-linux.yml   # tag-triggered Linux release build + GitHub Release upload
 .github/workflows/release-windows.yml # tag-triggered Windows release build + GitHub Release upload
 ```
@@ -128,9 +129,23 @@ cargo run --bin gen_master_hash
 cargo build --release
 ```
 
-`rust-toolchain.toml` pins `channel = "stable"`. Edition is 2024 (`rustc >= 1.85`), which
-enables let-chains (`if let Some(x) = y && cond`) — this is the idiomatic style already
-used throughout the codebase for what would otherwise be nested `if let { if ... }`.
+`rust-toolchain.toml` pins `channel = "stable"` and `components = ["clippy", "rustfmt"]`,
+so a fresh `rustup show` in this repo provisions everything the workflow above needs.
+Edition is 2024 (`rustc >= 1.85`), which enables let-chains (`if let Some(x) = y && cond`)
+— this is the idiomatic style already used throughout the codebase for what would
+otherwise be nested `if let { if ... }`.
+
+`[profile.release]` (LTO, `codegen-units = 1`, `strip = true`) lives in the **root**
+`Cargo.toml`, not `apps/humai/Cargo.toml` — Cargo only reads profile settings from the
+workspace root and silently ignores them in member manifests, so don't move it. Panic
+strategy is deliberately left at the default (`unwind`), not `abort`: the app spawns
+Tokio tasks (`rt.spawn`) for Ollama requests, and Tokio isolates a panicking task via
+unwind + `catch_unwind` so the rest of the app keeps running; `panic = "abort"` would
+turn any single bad task panic into a full process crash.
+
+`.github/workflows/ci.yml` runs `cargo check`/`test`/`clippy -D warnings` on Linux and
+Windows for every push to `main` and every PR — this is the gate that catches breakage
+before a release tag is ever cut. Keep it green.
 
 ### Distributing a standalone build
 
@@ -184,7 +199,29 @@ first launch — this is expected, not a bug).
   data — treat it as such (bump a version marker, don't just insert a column).
 - The Overview chat's message history is a separate SQLite database at
   `metrics/chat.sqlite` (`apps/humai/src/ui/overview_chat/store.rs` +
-  `store_schema.rs`), independent of the CSV experiment log.
+  `store_schema.rs`), independent of the CSV experiment log. `Store::open` sets
+  `busy_timeout` + WAL mode, and `Store::conn()` recovers from a poisoned mutex instead
+  of panicking — use `self.conn()` for any new method, never
+  `self.conn.lock().unwrap()` directly. Multi-statement writes (see `append_message`)
+  must go through `conn.transaction()`, not sequential `execute()` calls, so a crash
+  mid-write can't leave a message row without its generation row or a stale
+  `conversations.updated_at`.
+- Schema changes are "ensure column exists" (`ensure_conversations_columns` in
+  `store_schema.rs`), not real stepped migrations — fine for adding a nullable/defaulted
+  column, not sufficient for a column type change or a data backfill. If the schema
+  needs that kind of change, branch on `PRAGMA user_version` properly rather than
+  extending the idempotent-column-add pattern past what it's good for.
+
+## Release process
+
+Releases are tagged directly on `main`, not from a dedicated release branch — that's
+Git Flow-style overhead this project doesn't need (it earns its keep only once you must
+maintain multiple release lines in parallel, e.g. patching an old version while `main`
+has diverged; not the case here). The flow: bump `version` in `apps/humai/Cargo.toml`
+(and let `Cargo.lock` update) on its own short-lived branch, PR it into `main` like any
+other change, then tag `vX.Y.Z` at that merge commit on `main` and push the tag — that
+fires `release-linux.yml`/`release-windows.yml`, which build and upload
+`humai-<version>-ubu.tar.gz`/`humai-<version>-win.zip` to the tag's GitHub Release.
 
 ## Things to leave alone unless explicitly asked
 
