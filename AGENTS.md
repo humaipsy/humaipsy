@@ -102,6 +102,15 @@ This app must build and behave the same on Windows and Linux. Concretely:
 - Paths should be built with `PathBuf`/`Path::join`, never string concatenation with a
   literal `/` or `\`.
 
+## Locking
+
+Never write `.lock().unwrap()` / `.read().unwrap()` / `.write().unwrap()` — that
+propagates a *single* panic while a lock was held into a permanent crash on every
+subsequent call to that lock (some of these locks are touched every UI frame). Use
+`apps/humai/src/sync_ext.rs`'s `MutexExt`/`RwLockExt` instead:
+`mutex.lock_recover()`, `rwlock.read_recover()`/`.write_recover()`. Every `Mutex`/`RwLock`
+in the codebase goes through these; a new one that doesn't is a regression.
+
 ## Build / run / test
 
 All commands are run from `apps/humai/` (or via the root-level `run_app.sh`/`.bat` /
@@ -187,7 +196,18 @@ first launch — this is expected, not a bug).
 - `HUMAI_AIR_GAP=1` disables all outbound HTTP; `HUMAI_ALLOW_LOCAL_OLLAMA=0` additionally
   blocks the loopback Ollama call. This is enforced at request time in `ollama/mod.rs`
   (`guard_ollama_request`), not just hidden in the UI — don't bypass it when adding new
-  HTTP call sites.
+  HTTP call sites. Note this is opt-in, not the default: with air-gap off (the default),
+  there's no restriction on what host `OLLAMA_HOST` points to, so a remote host receives
+  full experiment transcripts. That's intentional (remote-Ollama is a supported use
+  case), just be aware of it.
+- Both `reqwest::Client` construction sites (`ollama/client.rs`, `ollama/engine.rs`) set
+  `connect_timeout` so an unreachable host fails fast. `ollama/client.rs` (model
+  listing) also sets a short overall `timeout` since that request should always be
+  quick. `ollama/engine.rs` (chat inference) deliberately does *not* set a tight overall
+  timeout — a legitimate generation can stream for minutes — but caps it generously (10
+  minutes) as a backstop against a connection that goes silent forever after accepting.
+  Don't tighten the inference client's timeout without checking it won't cut off real
+  long-running generations.
 
 ## Experiment recording
 
@@ -195,20 +215,28 @@ first launch — this is expected, not a bug).
   `HUMAI_METRICS_DIR`); the header/schema is in `apps/humai/src/recording/experiment_csv.rs`.
   Adding a new CSV column is a breaking format change for anyone with existing exported
   data — treat it as such (bump a version marker, don't just insert a column).
+- The CSV export filename is derived from `design.name`/`design.csv_name`, both
+  free-text UI fields — `csv_path_for_design` runs them through `sanitize_file_stem`
+  (strips `/`, `\`, `:`, control chars, and leading `.`) before ever joining them into a
+  path. That's the *only* place this sanitization happens; if you add another code path
+  that turns a design field into a filesystem path, sanitize there too rather than
+  assuming the UI already validated it.
 - The Overview chat's message history is a separate SQLite database at
   `metrics/chat.sqlite` (`apps/humai/src/ui/overview_chat/store.rs` +
   `store_schema.rs`), independent of the CSV experiment log. `Store::open` sets
-  `busy_timeout` + WAL mode, and `Store::conn()` recovers from a poisoned mutex instead
-  of panicking — use `self.conn()` for any new method, never
-  `self.conn.lock().unwrap()` directly. Multi-statement writes (see `append_message`)
-  must go through `conn.transaction()`, not sequential `execute()` calls, so a crash
-  mid-write can't leave a message row without its generation row or a stale
-  `conversations.updated_at`.
+  `busy_timeout` + WAL mode, restricts the file to `0600` on Unix, and `Store::conn()`
+  recovers from a poisoned mutex instead of panicking — use `self.conn()` for any new
+  method, never `self.conn.lock().unwrap()` directly. Multi-statement writes (see
+  `append_message`) must go through `conn.transaction()`, not sequential `execute()`
+  calls, so a crash mid-write can't leave a message row without its generation row or a
+  stale `conversations.updated_at`.
 - Schema changes are "ensure column exists" (`ensure_conversations_columns` in
   `store_schema.rs`), not real stepped migrations — fine for adding a nullable/defaulted
   column, not sufficient for a column type change or a data backfill. If the schema
   needs that kind of change, branch on `PRAGMA user_version` properly rather than
   extending the idempotent-column-add pattern past what it's good for.
+- `vault/.master_hash` is also restricted to `0600` on Unix (`vault.rs::restrict_to_owner`)
+  — it's an Argon2id password hash, readable-by-anyone-on-the-box was the previous state.
 
 ## Release process
 

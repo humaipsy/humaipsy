@@ -1,4 +1,5 @@
 use crate::app_model::Humai;
+use crate::sync_ext::MutexExt;
 use crate::vault::MasterVault;
 use eframe::egui;
 use std::sync::atomic::AtomicBool;
@@ -94,10 +95,10 @@ fn refresh_ollama_models_on_startup(
 	ui_state: &mut HumaiUiState,
 	ctx: &egui::Context,
 ) {
-	if ui_state.ollama.models.lock().unwrap().is_empty()
-		&& !*ui_state.ollama.models_loading.lock().unwrap()
+	if ui_state.ollama.models.lock_recover().is_empty()
+		&& !*ui_state.ollama.models_loading.lock_recover()
 	{
-		*ui_state.ollama.models_loading.lock().unwrap() = true;
+		*ui_state.ollama.models_loading.lock_recover() = true;
 		let models_arc = ui_state.ollama.models.clone();
 		let loading_arc = ui_state.ollama.models_loading.clone();
 		let ctx = ctx.clone();
@@ -107,8 +108,8 @@ fn refresh_ollama_models_on_startup(
 			let models = crate::ollama::fetch_ollama_models(&ollama_host)
 				.await
 				.unwrap_or_default();
-			*models_arc.lock().unwrap() = models;
-			*loading_arc.lock().unwrap() = false;
+			*models_arc.lock_recover() = models;
+			*loading_arc.lock_recover() = false;
 			ctx.request_repaint();
 		});
 	}

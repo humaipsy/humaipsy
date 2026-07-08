@@ -5,6 +5,7 @@ pub mod agent;
 pub mod metrics;
 pub mod ollama;
 pub mod recording;
+pub(crate) mod sync_ext;
 pub mod timer;
 pub mod ui;
 pub mod vault;

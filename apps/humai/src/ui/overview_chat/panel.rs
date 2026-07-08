@@ -21,6 +21,7 @@ use crate::recording::experiment_csv::{
     record_experiment_configured, record_final_answer, record_human_transcript,
 };
 use crate::recording::timing::InferenceTraceContext;
+use crate::sync_ext::MutexExt;
 
 use super::chat::{ChatExample, ChatMessage, Room};
 use super::incoming::MessageSource;
@@ -1025,7 +1026,7 @@ pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
         })
         .collect();
 
-    let mut order = room_order.lock().unwrap();
+    let mut order = room_order.lock_recover();
     order.retain(|id| rooms_by_id.contains_key(id));
     for c in &convs {
         if !order.iter().any(|id| id == &c.id) {
@@ -1054,7 +1055,7 @@ pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
 
     let chat_cell = CHAT.get_or_init(|| Mutex::new(ChatExample::new()));
     let active_room_id = ACTIVE_ROOM_ID.get_or_init(|| Mutex::new(None));
-    let mut chat = chat_cell.lock().unwrap();
+    let mut chat = chat_cell.lock_recover();
 
     let graph_running = app.conversation_graph_running.load(Ordering::Acquire);
     let human_to_agent_mode = matches!(app.chat_mode, GlobalChatMode::Enabled);
@@ -1158,7 +1159,7 @@ fn persist_and_hydrate_selected_room(
     active_room_id: &Mutex<Option<String>>,
 ) {
     let previous_room_id = {
-        let active = active_room_id.lock().unwrap();
+        let active = active_room_id.lock_recover();
         active.clone()
     };
     let next_room_id = chat.selected_room.clone();
@@ -1183,7 +1184,7 @@ fn persist_and_hydrate_selected_room(
             chat.hydrate(msgs, ts);
         }
 
-        let mut active = active_room_id.lock().unwrap();
+        let mut active = active_room_id.lock_recover();
         *active = next_room_id;
     }
 }
@@ -1201,7 +1202,7 @@ fn render_chat_columns(
 
 pub(crate) fn render_design_panel(app: &mut Humai, ui: &mut egui::Ui) {
     let chat_cell = CHAT.get_or_init(|| Mutex::new(ChatExample::new()));
-    let chat = chat_cell.lock().unwrap();
+    let chat = chat_cell.lock_recover();
     let human_to_agent_mode = matches!(app.chat_mode, GlobalChatMode::Enabled);
     let metrics_config = app.metrics_config.clone();
     render_right_bar(
@@ -1424,7 +1425,7 @@ fn render_chat_rectangle(
                                                 ui.add_space(4.0);
                                             }
                                         }
-                                        if *chat.waiting_for_response().lock().unwrap() {
+                                        if *chat.waiting_for_response().lock_recover() {
                                             ui.horizontal(|ui| {
                                                 ui.spinner();
                                                 ui.label(
