@@ -763,7 +763,10 @@ fn spawn_ollama_opening_question(
     }
 
     app.rt_handle.spawn(async move {
-        let agent = humai_core::agent::HumaiAgent::new(ollama_host, model, assistant_prompt)
+        let provider = std::sync::Arc::new(humai_core::provider::ollama_provider::OllamaProvider::new(
+            ollama_host,
+        ));
+        let agent = humai_core::agent::HumaiAgent::new(provider, model, assistant_prompt)
             .with_history_size(history_size);
 
         let out = agent
@@ -1575,8 +1578,13 @@ fn render_chat_rectangle(
                                 *flag = true;
                             }
                             app.rt_handle.spawn(async move {
+                                let provider = std::sync::Arc::new(
+                                    humai_core::provider::ollama_provider::OllamaProvider::new(
+                                        ollama_host,
+                                    ),
+                                );
                                 let agent = humai_core::agent::HumaiAgent::new(
-                                    ollama_host,
+                                    provider,
                                     model,
                                     assistant_prompt,
                                 )

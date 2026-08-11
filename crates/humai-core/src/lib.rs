@@ -10,6 +10,7 @@ pub mod experiment;
 #[path = "recording/metrics.rs"]
 pub mod metrics;
 pub mod ollama;
+pub mod provider;
 pub mod recording;
 pub mod store;
 pub mod sync_ext;
