@@ -4,12 +4,22 @@
 
 Features:
 
-- Cross-platform Application for Human-AI Interaction
-- Cognitive Science and HCI Experimental Design Application 
-- Integrated with Open-Weight Models
-- Local and Offline-First Field Architecture
-- Statistical Analysis Friendly Data Output
+- Cross-platform desktop application (Windows, Linux, macOS) for Human-AI Interaction research
+- Runs a two-condition (Cooperative / Argumentative), counterbalanced chat experiment against a
+  local or remote [Ollama](https://ollama.com) model, with a researcher-configurable number of
+  trials per condition
+- Local and offline-first: no server component, no telemetry, no required network dependency
+  beyond the Ollama host you point it at
+- Every trial is recorded to CSV, a mirrored JSONL audit-trail ledger, and a local SQLite chat log
 
+For how the app is put together (process model, module layout, storage formats, known
+limitations, and what's planned next) see [ARCHITECTURE.md](ARCHITECTURE.md). For contributor
+rules (build/run/test commands, cross-platform gotchas, release process) see
+[AGENTS.md](AGENTS.md).
+
+The engine (agent prompting, the Ollama client, experiment recording, the chat store, the vault)
+lives in the `humai-core` library crate with no UI dependency; `apps/humai` is the `eframe`/`egui`
+desktop binary built on top of it.
 
 ## Dependencies
 
@@ -19,8 +29,6 @@ Features:
 
 
 ## Development
-
-Development 
 
 <details>
 <summary>Commands</summary>
@@ -39,17 +47,16 @@ cargo check --all-targets
 # Run app (UI only)
 cargo run
 
-# Run the helper binary to create/update runs/.master_hash (run from repo root)
+# Run the helper binary to create/update vault/.master_hash (run from apps/humai/)
 cargo run --bin gen_master_hash
 
 # Build release binary
 cargo build --release
 
-# Run tests
+# Run tests (add --workspace from the repo root to also cover the humai-core crate)
 cargo test
 
-# Format and lint (if needed before commit)
-cargo fmt
+# Lint — CI-equivalent gate, must pass clean
 cargo clippy --all-targets -- -D warnings
 
 ```

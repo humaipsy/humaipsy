@@ -6,61 +6,77 @@ repo root points here — this file is the canonical reference.
 ## What this is
 
 Humai is a cross-platform (Windows + Linux + macOS) desktop application for running
-Human-AI Interaction / HCI experiments. It is a single Rust binary built with `eframe`/`egui`,
-talks to a local or remote [Ollama](https://ollama.com) server for model inference, and
-records experiment trials to CSV plus a local SQLite chat log. There is no server
-component and no build step beyond `cargo` — the whole product is `apps/humai`.
+Human-AI Interaction / HCI experiments. It's a two-crate Cargo workspace: `humai-core`
+is a UI-free library (agent prompting, the Ollama client, experiment recording, the
+chat SQLite store, the master-password vault), and `apps/humai` is the `eframe`/`egui`
+desktop binary built on top of it. The app talks to a local or remote
+[Ollama](https://ollama.com) server for model inference, and records experiment
+trials to CSV plus a mirrored JSONL event ledger plus a local SQLite chat log. There
+is no server component and no build step beyond `cargo`.
 
 License is proprietary (see [README.md](README.md)); do not add third-party code or
 dependencies without checking the license is compatible.
 
+For a narrative walkthrough of how these modules fit together — process model, the
+experiment engine's trial/condition logic, storage formats, security model, known
+limitations, and the roadmap — see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Repository layout
 
 ```
-Cargo.toml                 # workspace root, members = ["apps/humai"]
-apps/humai/                # the only workspace member — the actual app
-  Cargo.toml                # package manifest (version is the release version, e.g. 0.1.3)
-  .cargo/config.toml        # target-dir = "target" so `cargo` works from this dir without -p
-  build.rs                  # Windows-only: generates the .ico and embeds it as a resource
+Cargo.toml                       # workspace root, members = ["apps/humai", "crates/humai-core"]
+crates/humai-core/                 # library crate — zero egui/eframe dependency
+  Cargo.toml
   src/
-    main.rs                  # entry point: Tokio runtime + eframe::run_native
-    lib.rs                   # module tree / re-exports (pub use ... as the crate's public API)
-    app_model.rs              # `Humai` struct: top-level in-memory app state
-    app_state.rs               # `AppState`: shared, lockable runtime config (metrics)
-    agent.rs                  # `HumaiAgent`: prompt construction + calls into ollama::
-    vault.rs                  # master-password gate (Argon2id) + encrypted Vault blob —
-                                #   pure logic, no egui/UI dependency (rendering lives in
-                                #   ui/vault_panel.rs; keep it that way, see below)
-    timer.rs                  # process-global trial countdown timer used by the experiment UI
-    window_icon.rs             # platform-split: Win32 SendMessage icons vs egui IconData
-    sync_ext.rs                # MutexExt/RwLockExt poison-recovering lock accessors (see Locking below)
-    ollama/                   # Ollama HTTP client, streaming chat engine, model discovery
-    recording/                # experiment_csv (the active per-trial-event CSV writer), timing,
-                                #   metrics (re-export shim); ledger.rs + audit.rs are unwired
-                                #   scaffolding for a future audit-bundle feature — see Experiment
-                                #   recording below before assuming either is on the write path
-    ui/                        # egui panels: settings, design, overview chat, vault unlock UI
-      overview_chat/            # experiment engine + chat UI (largest module, ~2k-line panel.rs) +
-                                #   SQLite-backed message store (rusqlite, "chat.sqlite")
-      vault_panel.rs            # renders MasterVault; the only file that may import egui
-                                #   *and* crate::vault together
+    lib.rs                          # module tree / public API
+    agent.rs                         # `HumaiAgent`: prompt construction + calls into ollama::
+    chat_types.rs                      # ChatMessage/Room/MessageSource/AssistantGeneration/
+                                       #   MessageCorrelation/UiInbox — shared by store.rs and
+                                       #   apps/humai's ChatExample (which does the egui rendering)
+    experiment/                          # pure trial-sequencing/counterbalancing engine —
+                                       #   parameterized, unit-tested, no process-global state.
+                                       #   apps/humai/src/ui/overview_chat/panel.rs delegates its
+                                       #   condition/trial math here instead of hardcoding it.
+    ollama/                                # Ollama HTTP client, chat engine, model discovery
+    recording/                              # experiment_csv (CSV writer + JSONL ledger mirror),
+                                       #   ledger (JSONL event log + summary/manifest hashing —
+                                       #   wired into experiment_csv, not standalone), timing, metrics
+    store.rs / store_schema.rs               # SQLite chat store (rusqlite, "chat.sqlite")
+    sync_ext.rs                                # MutexExt/RwLockExt poison-recovering lock
+                                       #   accessors — used by both crates, see Locking below
+    timer.rs                                    # trial countdown timer used by the experiment UI
+    vault.rs                                     # master-password gate (Argon2id) + encrypted
+                                       #   Vault blob — no egui/UI dependency (rendering lives in
+                                       #   apps/humai/src/ui/vault_panel.rs; keep it that way)
+apps/humai/                      # the UI binary — depends on humai-core as a path dependency
+  Cargo.toml                        # package manifest (version is the release version, e.g. 0.1.3)
+  .cargo/config.toml                 # target-dir = "target" so `cargo` works from this dir without -p
+  build.rs                            # Windows-only: generates the .ico and embeds it as a resource
+  src/
+    main.rs                              # entry point: Tokio runtime + eframe::run_native
+    lib.rs                                # module tree / re-exports (pub use ... as the crate's public API)
+    app_model.rs                            # `Humai` struct: top-level in-memory app state
+    app_state.rs                             # `AppState`: shared, lockable runtime config (metrics)
+    window_icon.rs                            # platform-split: Win32 SendMessage icons vs egui IconData
+    ui/                                        # egui panels: settings, design, overview chat, vault unlock UI
+      overview_chat/                             # experiment engine UI + chat rendering (largest module,
+                                       #   panel.rs is ~2k lines) — see "Known state-management debt" below
+      vault_panel.rs                              # renders MasterVault; the only file that may import egui
+                                       #   *and* humai_core::vault together
     bin/
-      gen_master_hash.rs         # standalone binary: interactively writes vault/.master_hash
-  assets/                    # window/topbar icon PNGs + bundled NotoEmoji-Regular.ttf (source of
-                                #   truth; the Windows .ico is generated from icon_window_bar.png)
-  vault/.master_hash          # gitignored — local Argon2id hash file, created on first run
-  metrics/                    # gitignored except structure — CSV exports + chat.sqlite land here
-distribute_app.sh / .bat    # build release + stage a standalone dist/ folder (see below)
-run_app.sh / .bat           # `cargo clean && cargo run` — quick dev loop
+      gen_master_hash.rs                            # standalone binary: interactively writes
+                                       #   vault/.master_hash; depends only on humai_core::vault
+  assets/                            # window/topbar icon PNGs + bundled NotoEmoji-Regular.ttf (source of
+                                     #   truth; the Windows .ico is generated from icon_window_bar.png)
+  vault/.master_hash                  # gitignored — local Argon2id hash file, created on first run
+  metrics/                            # gitignored except structure — CSV/ledger exports + chat.sqlite land here
+distribute_app.sh / .bat            # build release + stage a standalone dist/ folder (see below)
+run_app.sh / .bat                   # `cargo clean && cargo run` — quick dev loop
 .github/workflows/ci.yml               # runs on every push to main + every PR: check/test/clippy on Linux + Windows + macOS
 .github/workflows/release-linux.yml   # tag-triggered Linux release build + GitHub Release upload
 .github/workflows/release-windows.yml # tag-triggered Windows release build + GitHub Release upload
 .github/workflows/release-macos.yml   # tag-triggered macOS (arm64) release build + GitHub Release upload
 ```
-
-For a narrative walkthrough of how these modules fit together — process model, the
-experiment engine's trial/condition logic, storage formats, security model — see
-[ARCHITECTURE.md](ARCHITECTURE.md).
 
 All three release workflows fire on a `v*` tag push and upload to the GitHub Release
 for that tag: `release-linux.yml` produces `humai-<version>-ubu.tar.gz`,
@@ -73,11 +89,42 @@ Intel/x86_64 macOS build; add a second job to `release-macos.yml` (or a
 parity the same way `distribute_app.sh`/`.bat` are kept in parity — Linux and macOS
 both wrap `distribute_app.sh` (it's plain POSIX bash, no Linux-specific bits) and
 Windows wraps `distribute_app.bat`, each with a versioned `HUMAI_DIST_DIR`, then
-archive and upload the result.
+archive and upload the result. Both scripts build from `apps/humai/`; Cargo resolves
+the `humai-core` path dependency as part of that build automatically, so the
+two-crate workspace split needed no changes to either script.
+
+## `humai-core` vs `apps/humai`: where new code goes
+
+- **If it doesn't need `egui`/`eframe`, it belongs in `humai-core`.** Business logic
+  (prompt construction, trial sequencing, recording, the chat store, the vault) lives
+  there so it can be unit tested directly and so a future CLI/HTTP API can depend on
+  it without pulling in a GUI toolkit. `crates/humai-core/src/experiment/mod.rs` is
+  the reference example: pure functions taking their inputs as parameters, no
+  `OnceLock`/global state, straightforward to test.
+- **If it renders (`egui::Ui`, `egui::Context`, ...), it belongs in `apps/humai`.**
+  `apps/humai/src/ui/overview_chat/chat.rs`'s `ChatExample` is the reference example
+  of the seam: the pure data types it operates on (`ChatMessage`, `Room`, ...) live in
+  `humai_core::chat_types`, but `ChatExample` itself and its `sidebar_ui` rendering
+  method stay in the UI crate.
+- **Known state-management debt** (documented in ARCHITECTURE.md's "Known
+  Limitations", not something to extend): `apps/humai/src/ui/overview_chat/panel.rs`
+  and `chat.rs` still hold experiment/chat UI state (current trial, chat rooms,
+  participant ID, modal open/closed flags) in process-global `OnceLock<Mutex<T>>`
+  statics rather than as fields on `Humai`/`HumaiApp`. This predates the
+  `humai-core` split and hasn't been fixed yet — don't copy the pattern into new
+  code. New per-app UI state should be a field on `Humai` (`app_model.rs`) or a
+  small nested struct held on `HumaiApp` (see `HumaiUiState`/`OllamaUiState` in
+  `ui/mod.rs` for the pattern actually worth following), threaded through render
+  calls explicitly. The one `OnceLock`-based cache that *is* the right pattern is a
+  genuine cross-cutting singleton keyed by something other than "the app started":
+  `ollama::engine::InferenceEngine::from_host`'s per-host connection-pool cache, and
+  `panel.rs`'s `shared_store` chat-database cache modeled after it — both are
+  `OnceLock<Mutex<HashMap<Key, Arc<T>>>>` caches with a real cache-key, not a
+  disguised global variable for state that has exactly one owner.
 
 ## Cross-platform rules (read this before touching platform-sensitive code)
 
-This app must build and behave the same on Windows and Linux. Concretely:
+This app must build and behave the same on Windows, Linux, and macOS. Concretely:
 
 - **Never assume `HOME` is set.** Windows sets `USERPROFILE`, not `HOME`. Any code that
   needs the user's home directory must check both (see `copy_experiment_csv_to_desktop`
@@ -87,22 +134,23 @@ This app must build and behave the same on Windows and Linux. Concretely:
   `openssl = { features = ["vendored"] } ` direct dependency used to make the app
   fail to build on plain Windows dev machines (`openssl-sys` tries to compile OpenSSL
   from source via Perl/NASM, which most Windows boxes don't have). It has been removed;
-  `reqwest` uses `features = ["rustls-tls"]` and `rusqlite` uses `features = ["bundled"]`
-  specifically so no system OpenSSL/pkg-config is required on either platform. If a new
-  dependency wants to pull in `openssl`/`native-tls`, prefer a rustls-based alternative.
+  `reqwest` (in `humai-core`) uses `features = ["rustls-tls"]` and `rusqlite` uses
+  `features = ["bundled"]` specifically so no system OpenSSL/pkg-config is required on
+  any platform. If a new dependency wants to pull in `openssl`/`native-tls`, prefer a
+  rustls-based alternative.
 - **Fonts must be bundled, not loaded from OS-specific filesystem paths.** The chat UI
   needs Unicode emoji glyph coverage (Ollama responses can contain emoji), which egui's
   stock fonts don't provide. `apps/humai/src/ui/mod.rs` (`prepare_shell`) bundles
   `assets/NotoEmoji-Regular.ttf` via `include_bytes!` and registers it as a fallback in
-  both font families — this works identically on Windows and Linux with no runtime
-  dependency on fonts being installed. An earlier version of this code probed hardcoded
-  `/usr/share/fonts/...` paths, which found nothing on Windows (no such paths) and was
-  unreliable on Linux (path varies by distro) — don't reintroduce that pattern. Also
-  note: egui/epaint's text rasterizer only supports single-color glyph outlines, not
-  COLR/CBDT color tables, so this renders emoji as tinted monochrome pictographs, not
-  full-color — that's a renderer limitation, not a bug in the font setup. See
-  `ui::tests::bundled_emoji_font_covers_common_emoji_after_prepare_shell` for the
-  regression test (uses `Fonts::has_glyphs` to prove real glyph resolution).
+  both font families — this works identically on Windows, Linux, and macOS with no
+  runtime dependency on fonts being installed. An earlier version of this code probed
+  hardcoded `/usr/share/fonts/...` paths, which found nothing on Windows (no such
+  paths) and was unreliable on Linux (path varies by distro) — don't reintroduce that
+  pattern. Also note: egui/epaint's text rasterizer only supports single-color glyph
+  outlines, not COLR/CBDT color tables, so this renders emoji as tinted monochrome
+  pictographs, not full-color — that's a renderer limitation, not a bug in the font
+  setup. See `ui::tests::bundled_emoji_font_covers_common_emoji_after_prepare_shell`
+  for the regression test (uses `Fonts::has_glyphs` to prove real glyph resolution).
 - **Platform-specific code lives behind `#[cfg(windows)]` / `#[cfg(not(windows))]`**,
   never behind a `target_os = "linux"` check unless macOS is explicitly meant to be
   excluded too. See `window_icon.rs` and `Cargo.toml`'s `[target.'cfg(windows)'...]`
@@ -126,14 +174,21 @@ This app must build and behave the same on Windows and Linux. Concretely:
 Never write `.lock().unwrap()` / `.read().unwrap()` / `.write().unwrap()` — that
 propagates a *single* panic while a lock was held into a permanent crash on every
 subsequent call to that lock (some of these locks are touched every UI frame). Use
-`apps/humai/src/sync_ext.rs`'s `MutexExt`/`RwLockExt` instead:
+`humai_core::sync_ext`'s `MutexExt`/`RwLockExt` instead:
 `mutex.lock_recover()`, `rwlock.read_recover()`/`.write_recover()`. Every `Mutex`/`RwLock`
 in the codebase goes through these; a new one that doesn't is a regression.
 
 ## Build / run / test
 
 All commands are run from `apps/humai/` (or via the root-level `run_app.sh`/`.bat` /
-`distribute_app.sh`/`.bat` wrappers, which `cd` into it for you).
+`distribute_app.sh`/`.bat` wrappers, which `cd` into it for you). Cargo resolves the
+`humai-core` path dependency automatically, so these commands build/test both crates'
+code as needed even though they're invoked from the binary crate's directory; to
+target `humai-core` directly (e.g. running only its tests), pass `-p humai-core` or
+run the same commands from `crates/humai-core/` instead. `default-members =
+["apps/humai"]` in the workspace root `Cargo.toml` means a bare `cargo check`/`test`
+run from the *repository root* only covers `apps/humai` — use `--workspace` from the
+root if you want both crates.
 
 ```sh
 # Fast compile check
@@ -159,19 +214,24 @@ cargo build --release
 so a fresh `rustup show` in this repo provisions everything the workflow above needs.
 Edition is 2024 (`rustc >= 1.85`), which enables let-chains (`if let Some(x) = y && cond`)
 — this is the idiomatic style already used throughout the codebase for what would
-otherwise be nested `if let { if ... }`.
+otherwise be nested `if let { if ... }`. Because `channel = "stable"` floats forward,
+a new stable Rust release can occasionally graduate a new `clippy`/`rustc` lint that
+trips `-D warnings` on previously-fine code with zero changes on our side (this
+happened with `float_literal_f32_fallback` — untyped float literals passed to a
+generic `f32`-bound parameter). If CI goes red on `main` with no relevant diff,
+check whether the lint is new before assuming a regression.
 
 `[profile.release]` (LTO, `codegen-units = 1`, `strip = true`) lives in the **root**
-`Cargo.toml`, not `apps/humai/Cargo.toml` — Cargo only reads profile settings from the
+`Cargo.toml`, not either member's manifest — Cargo only reads profile settings from the
 workspace root and silently ignores them in member manifests, so don't move it. Panic
 strategy is deliberately left at the default (`unwind`), not `abort`: the app spawns
 Tokio tasks (`rt.spawn`) for Ollama requests, and Tokio isolates a panicking task via
 unwind + `catch_unwind` so the rest of the app keeps running; `panic = "abort"` would
 turn any single bad task panic into a full process crash.
 
-`.github/workflows/ci.yml` runs `cargo check`/`test`/`clippy -D warnings` on Linux and
-Windows for every push to `main` and every PR — this is the gate that catches breakage
-before a release tag is ever cut. Keep it green.
+`.github/workflows/ci.yml` runs `cargo check`/`test`/`clippy -D warnings` on Linux,
+Windows, and macOS for every push to `main` and every PR — this is the gate that
+catches breakage before a release tag is ever cut. Keep it green.
 
 ### Distributing a standalone build
 
@@ -198,20 +258,31 @@ first launch — this is expected, not a bug).
 - The hash lives at `vault/.master_hash` (relative to CWD) or can be supplied via
   `HUMAI_MASTER_HASH`. This file is gitignored — never commit a real hash.
 - KDF tuning (`HUMAI_ARGON2_M_KIB`, `HUMAI_ARGON2_T`, `HUMAI_ARGON2_P`) and the
-  ChaCha20-Poly1305 vault blob logic are in `apps/humai/src/vault.rs`; see the module
-  doc comment at the top of that file for the full env-var list.
-- `vault.rs` must not depend on `egui`/`eframe`. It's crypto and state (`MasterVault`,
-  `Vault`, KDF params); rendering lives in `ui/vault_panel.rs`, which talks to it only
-  through `pub(crate)` accessors (`is_skip_vault`, `needs_password_setup`, `status`,
-  `master_input_mut`, `confirm_input_mut`, `try_unlock`, `try_setup_password`). If you
-  need the UI to observe new state, add an accessor rather than making the fields
-  `pub` or pulling `egui` back into `vault.rs`.
+  ChaCha20-Poly1305 vault blob logic are in `crates/humai-core/src/vault.rs`; see the
+  module doc comment at the top of that file for the full env-var list.
+- `vault.rs` must not depend on `egui`/`eframe` — it lives in `humai-core` specifically
+  so it can't. It's crypto and state (`MasterVault`, `Vault`, KDF params); rendering
+  lives in `apps/humai/src/ui/vault_panel.rs`, which talks to it only through `pub`
+  accessors (`is_skip_vault`, `needs_password_setup`, `status`, `master_input_mut`,
+  `confirm_input_mut`, `try_unlock`, `try_setup_password`). If you need the UI to
+  observe new state, add an accessor rather than making the fields more visible than
+  `pub(crate)` within `vault.rs` or pulling `egui` into `humai-core`.
 
 ## Ollama integration
 
 - `OLLAMA_HOST` (default `http://127.0.0.1:11434`) and `OLLAMA_MODEL` select the
-  inference target; both can be changed at runtime from the Settings panel, which sets
-  the process env var so downstream code picks it up immediately.
+  inference target. `OLLAMA_HOST` can be changed at runtime from the Settings panel,
+  which sets the process env var so downstream code picks it up immediately.
+  `OLLAMA_MODEL` is read from the environment exactly once, in `Humai::new()`, to
+  seed the *initial* model selection at startup — after that, the selected model is
+  plain typed state (`Humai::selected_ollama_model`) passed explicitly into every
+  inference call; nothing reads `OLLAMA_MODEL` from the environment again at
+  runtime. Don't reintroduce a runtime `std::env::set_var("OLLAMA_MODEL", ..)` call
+  as a way to propagate a UI change — that was removed specifically because it made
+  the selected model exist in two unsynchronized places at once.
+- If a caller doesn't have a model configured yet, `humai_core::ollama` falls back to
+  the `DEFAULT_OLLAMA_MODEL` constant (`ollama/mod.rs`) — a plain string, not an
+  env-var lookup.
 - `HUMAI_AIR_GAP=1` disables all outbound HTTP; `HUMAI_ALLOW_LOCAL_OLLAMA=0` additionally
   blocks the loopback Ollama call. This is enforced at request time in `ollama/mod.rs`
   (`guard_ollama_request`), not just hidden in the UI — don't bypass it when adding new
@@ -231,7 +302,7 @@ first launch — this is expected, not a bug).
 ## Experiment recording
 
 - Per-trial rows are appended to `metrics/<ExpName>.csv` (configurable via
-  `HUMAI_METRICS_DIR`); the header/schema is in `apps/humai/src/recording/experiment_csv.rs`.
+  `HUMAI_METRICS_DIR`); the header/schema is in `crates/humai-core/src/recording/experiment_csv.rs`.
   Adding a new CSV column is a breaking format change for anyone with existing exported
   data — treat it as such (bump a version marker, don't just insert a column).
 - The CSV export filename is derived from `design.name`/`design.csv_name`, both
@@ -240,15 +311,29 @@ first launch — this is expected, not a bug).
   path. That's the *only* place this sanitization happens; if you add another code path
   that turns a design field into a filesystem path, sanitize there too rather than
   assuming the UI already validated it.
+- Every CSV row is also mirrored into a JSONL event ledger at
+  `metrics/runs/<experiment_id>/<run_id>/events.jsonl` (`recording::ledger::EventLedger`,
+  opened lazily by `experiment_csv::ensure_ledger` the first time a row is emitted for
+  a given session, finalized — `system.run_stopped` + `summary.json` with SHA-256
+  hashes and event counts — in `end_experiment()`). This used to be fully-implemented,
+  fully-tested, and completely unused; it's wired in now, so a new CSV event type
+  should get a corresponding ledger event automatically (both go through the shared
+  `emit()`/`ledger_append()` path) — don't add a new call site that writes a CSV row
+  without going through `emit()`.
 - The Overview chat's message history is a separate SQLite database at
-  `metrics/chat.sqlite` (`apps/humai/src/ui/overview_chat/store.rs` +
-  `store_schema.rs`), independent of the CSV experiment log. `Store::open` sets
-  `busy_timeout` + WAL mode, restricts the file to `0600` on Unix, and `Store::conn()`
-  recovers from a poisoned mutex instead of panicking — use `self.conn()` for any new
-  method, never `self.conn.lock().unwrap()` directly. Multi-statement writes (see
-  `append_message`) must go through `conn.transaction()`, not sequential `execute()`
-  calls, so a crash mid-write can't leave a message row without its generation row or a
-  stale `conversations.updated_at`.
+  `<metrics output dir>/chat.sqlite` (`crates/humai-core/src/store.rs` + `store_schema.rs`),
+  independent of the CSV/ledger experiment log, and its path now flows through the
+  same `MetricsConfig` output directory as the CSV instead of a separately-hardcoded
+  path. `Store::open` sets `busy_timeout` + WAL mode, restricts the file to `0600` on
+  Unix, and `Store::conn()` recovers from a poisoned mutex instead of panicking — use
+  `self.conn()` for any new method, never `self.conn.lock().unwrap()` directly.
+  Multi-statement writes (see `append_message`) must go through `conn.transaction()`,
+  not sequential `execute()` calls, so a crash mid-write can't leave a message row
+  without its generation row or a stale `conversations.updated_at`. The `Store` itself
+  is opened at most once per path and cached (`apps/humai/src/ui/overview_chat/panel.rs`'s
+  `shared_store`, an `Arc<Store>` keyed by `PathBuf`) — don't call `Store::open`
+  directly from UI render code; go through `shared_store`/`chat_db_path` instead, or
+  you'll reintroduce the every-frame-reopen bug that pattern fixed.
 - Schema changes are "ensure column exists" (`ensure_conversations_columns` in
   `store_schema.rs`), not real stepped migrations — fine for adding a nullable/defaulted
   column, not sufficient for a column type change or a data backfill. If the schema
@@ -279,5 +364,9 @@ to the tag's GitHub Release.
   consistent formatting pass; a full reformat would bury real changes in noise. Match
   the surrounding file's existing style when editing, and only fix formatting in lines
   you're already touching.
-- `apps/humai/metrics/*.csv`, `metrics/chat.sqlite`, and `vault/.master_hash` are
-  gitignored local/experiment artifacts — never add them to git.
+- `apps/humai/metrics/*.csv`, `metrics/runs/`, `metrics/chat.sqlite`, and
+  `vault/.master_hash` are gitignored local/experiment artifacts — never add them to git.
+- Don't add a new process-global `OnceLock<Mutex<T>>` singleton for state that has a
+  natural owner (`Humai`, `HumaiApp`, or a small nested state struct). See "`humai-core`
+  vs `apps/humai`: where new code goes" above — `panel.rs`/`chat.rs`'s existing statics
+  are known debt being paid down, not a pattern to extend.
