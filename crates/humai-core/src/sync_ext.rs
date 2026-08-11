@@ -9,7 +9,7 @@
 
 use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-pub(crate) trait MutexExt<T> {
+pub trait MutexExt<T> {
     fn lock_recover(&self) -> MutexGuard<'_, T>;
 }
 
@@ -19,7 +19,7 @@ impl<T> MutexExt<T> for Mutex<T> {
     }
 }
 
-pub(crate) trait RwLockExt<T> {
+pub trait RwLockExt<T> {
     fn read_recover(&self) -> RwLockReadGuard<'_, T>;
     fn write_recover(&self) -> RwLockWriteGuard<'_, T>;
 }

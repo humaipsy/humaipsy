@@ -106,14 +106,9 @@ impl InferenceEngine {
             return Err(anyhow!(OLLAMA_STOPPED_MSG));
         }
 
-        let model = if let Some(m) = req.model_override {
-            if m.trim().is_empty() {
-                std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "glm-4.7-flash:latest".to_string())
-            } else {
-                m.to_string()
-            }
-        } else {
-            std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "glm-4.7-flash:latest".to_string())
+        let model = match req.model_override {
+            Some(m) if !m.trim().is_empty() => m.to_string(),
+            _ => super::DEFAULT_OLLAMA_MODEL.to_string(),
         };
 
         let url = format!("{}/api/chat", self.host);

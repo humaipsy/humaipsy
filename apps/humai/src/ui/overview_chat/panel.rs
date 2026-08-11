@@ -1,31 +1,32 @@
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
 use egui_phosphor::regular;
 
-use crate::agent::timing_to_inference_snapshot;
+use humai_core::agent::timing_to_inference_snapshot;
 use crate::app_model::{GlobalChatMode, Humai};
-use crate::metrics::{
+use humai_core::metrics::{
     display_csv_path, ExperimentDesignSnapshot, MetricsConfig, SessionMetadata,
     TrialMetadata,
 };
-use crate::recording::experiment_csv::{
+use humai_core::recording::experiment_csv::{
     self, begin_session, begin_trial, end_experiment, end_trial, record_ai_transcript,
     record_experiment_configured, record_final_answer, record_human_transcript,
 };
-use crate::recording::timing::InferenceTraceContext;
-use crate::sync_ext::MutexExt;
+use humai_core::recording::timing::InferenceTraceContext;
+use humai_core::sync_ext::MutexExt;
 
-use super::chat::{ChatExample, ChatMessage, Room};
-use super::incoming::MessageSource;
-use super::store::Store;
+use humai_core::chat_types::{ChatMessage, MessageSource, Room};
+use humai_core::store::Store;
+
+use super::chat::ChatExample;
 
 static CHAT: OnceLock<Mutex<ChatExample>> = OnceLock::new();
 static ACTIVE_ROOM_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
@@ -36,8 +37,39 @@ static EXP_RUN_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 static GLOBAL_INPUT_MODAL: OnceLock<Mutex<InputModalState>> = OnceLock::new();
 
-const EXP_CONDITION_NAMES: [&str; 2] = ["COOP", "ARGUM"];
-const EXP_TRIALS_PER_CONDITION: usize = 2;
+/// Chat SQLite connections, keyed by path and opened at most once per path —
+/// mirrors `InferenceEngine::from_host`'s cache in `humai_core::ollama::engine`.
+/// `render_overview_panel` used to call `Store::open` fresh on every UI frame
+/// (a new connection, `PRAGMA` setup, and schema check every ~16ms while the
+/// Overview tab is visible); this cache is what fixes that.
+static STORE_CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<Store>>>> = OnceLock::new();
+
+fn shared_store(db_path: &Path) -> Result<Arc<Store>, humai_core::store::StoreError> {
+    let cache = STORE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = cache.lock_recover();
+    if let Some(store) = guard.get(db_path) {
+        return Ok(store.clone());
+    }
+    let store = Arc::new(Store::open(db_path)?);
+    guard.insert(db_path.to_path_buf(), store.clone());
+    Ok(store)
+}
+
+/// The chat transcript database lives alongside the experiment CSV output,
+/// under the same operator-configurable `MetricsConfig` output directory,
+/// instead of a separate hardcoded `"metrics/chat.sqlite"` path.
+fn chat_db_path(app: &Humai) -> PathBuf {
+    app.metrics_config.output_path().join("chat.sqlite")
+}
+
+// The pure counterbalancing/trial-sequencing math lives in
+// humai_core::experiment (parameterized, unit-tested there). This file keeps
+// thin wrappers with the same names/signatures the rest of panel.rs already
+// calls, so those call sites don't need to change, while the wrappers now read
+// the *actual* configured condition/trial counts from HUMAI_EXPDESIGN instead
+// of the old hardcoded 2x2 constants — this is what makes the Design tab's
+// "Conditions"/"Trials" controls actually take effect.
+use humai_core::experiment::TrialDescriptor;
 
 #[derive(Clone, Debug, Default)]
 struct ExperimentSessionState {
@@ -53,78 +85,29 @@ struct ExperimentSessionState {
     experiment_complete: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct TrialDescriptor {
-    condition_index: usize,
-    trial_in_condition: usize,
-}
-
-fn total_experiment_trials() -> usize {
-    // 2 conditions x 2 trials per condition = 4 trial windows.
-    EXP_CONDITION_NAMES.len() * EXP_TRIALS_PER_CONDITION
-}
-
-fn participant_id_numeric_value(participant_id: &str) -> Option<u64> {
-    let trimmed = participant_id.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if let Ok(value) = trimmed.parse::<u64>() {
-        return Some(value);
-    }
-
-    let trailing_digits = trimmed
-        .chars()
-        .rev()
-        .take_while(|ch| ch.is_ascii_digit())
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect::<String>();
-    if !trailing_digits.is_empty() {
-        return trailing_digits.parse().ok();
-    }
-
-    let all_digits: String = trimmed
-        .chars()
-        .filter(|ch| ch.is_ascii_digit())
-        .collect();
-    if all_digits.is_empty() {
-        None
-    } else {
-        all_digits.parse().ok()
-    }
-}
-
-fn counterbalance_starts_with_argum(participant_id: &str) -> bool {
-    participant_id_numeric_value(participant_id)
-        .map(|value| value % 2 == 1)
-        .unwrap_or(false)
-}
-
-fn current_participant_id() -> String {
+fn current_design() -> HumaiExpDesign {
     HUMAI_EXPDESIGN
         .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
         .lock()
-        .map(|design| design.participant_id.trim().to_string())
+        .map(|design| design.clone())
         .unwrap_or_default()
 }
 
+fn total_experiment_trials() -> usize {
+    let design = current_design();
+    humai_core::experiment::total_experiment_trials(
+        humai_core::experiment::clamp_condition_count(design.conditions),
+        humai_core::experiment::clamp_trials_per_condition(design.trials),
+    )
+}
+
 fn trial_descriptor(index: usize) -> TrialDescriptor {
-    // Even participant IDs: COOP, ARGUM, COOP, ARGUM.
-    // Odd participant IDs: ARGUM, COOP, ARGUM, COOP.
-    let starts_with_argum = counterbalance_starts_with_argum(&current_participant_id());
-    let base_condition = index % EXP_CONDITION_NAMES.len();
-    let condition_index = if starts_with_argum {
-        (base_condition + 1) % EXP_CONDITION_NAMES.len()
-    } else {
-        base_condition
-    };
-    let trial_in_condition = index / EXP_CONDITION_NAMES.len();
-    TrialDescriptor {
-        condition_index,
-        trial_in_condition,
-    }
+    let design = current_design();
+    humai_core::experiment::trial_descriptor(
+        index,
+        &design.participant_id,
+        humai_core::experiment::clamp_condition_count(design.conditions),
+    )
 }
 
 fn current_trial_descriptor_from_state(state: &ExperimentSessionState) -> TrialDescriptor {
@@ -159,21 +142,11 @@ fn condition_instruction_for_state(
     argum_prompt: &str,
 ) -> String {
     let desc = current_trial_descriptor_from_state(state);
-    let condition = EXP_CONDITION_NAMES
-        .get(desc.condition_index)
-        .copied()
-        .unwrap_or("COOP");
+    let condition = humai_core::experiment::condition_name(desc.condition_index);
 
     match condition {
         "ARGUM" => argum_prompt.to_string(),
         _ => coop_prompt.to_string(),
-    }
-}
-
-fn condition_label(name: &str) -> String {
-    match name {
-        "ARGUM" => "Argum".to_string(),
-        _ => "Cooperative".to_string(),
     }
 }
 
@@ -191,13 +164,10 @@ fn design_snapshot(design: &HumaiExpDesign) -> ExperimentDesignSnapshot {
 }
 
 fn trial_metadata_from_descriptor(desc: TrialDescriptor) -> TrialMetadata {
-    let condition = EXP_CONDITION_NAMES
-        .get(desc.condition_index)
-        .copied()
-        .unwrap_or("COOP");
+    let condition = humai_core::experiment::condition_name(desc.condition_index);
     TrialMetadata {
         condition_index: desc.condition_index,
-        condition_label: condition_label(condition),
+        condition_label: humai_core::experiment::condition_label(condition).to_string(),
         trial_in_condition: desc.trial_in_condition,
         block: desc.trial_in_condition + 1,
     }
@@ -245,7 +215,7 @@ fn assistant_prompt_for_current_condition(app: &Humai) -> String {
 }
 
 fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, timed_out: bool) {
-    let was_running = crate::timer::main_timer_is_running();
+    let was_running = humai_core::timer::main_timer_is_running();
     let mut session = match EXPERIMENT_SESSION
         .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
         .lock()
@@ -283,7 +253,7 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
         session.running = false;
         session.trial_timeout_popup_open = false;
         drop(session);
-        crate::timer::pause_main_timer();
+        humai_core::timer::pause_main_timer();
         set_experiment_running(false);
 
         let final_question = HUMAI_EXPDESIGN
@@ -320,10 +290,7 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
     session.trial_memory_start_idx = chat.messages.len();
     session.trial_timeout_popup_open = false;
     let desc = current_trial_descriptor_from_state(&session);
-    let condition = EXP_CONDITION_NAMES
-        .get(desc.condition_index)
-        .copied()
-        .unwrap_or("COOP");
+    let condition = humai_core::experiment::condition_name(desc.condition_index);
     let session_meta = session_metadata_from_state(&session);
     drop(session);
 
@@ -353,8 +320,8 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
     );
 
     if was_running {
-        crate::timer::stop_and_reset_main_timer();
-        crate::timer::start_main_timer();
+        humai_core::timer::stop_and_reset_main_timer();
+        humai_core::timer::start_main_timer();
     }
 
     let design = HUMAI_EXPDESIGN
@@ -388,7 +355,7 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
 }
 
 fn handle_trial_timeout(app: &Humai, store: &Store, chat: &mut ChatExample) {
-    if !crate::timer::main_timer_is_running() {
+    if !humai_core::timer::main_timer_is_running() {
         return;
     }
 
@@ -398,7 +365,7 @@ fn handle_trial_timeout(app: &Humai, store: &Store, chat: &mut ChatExample) {
         .map(|design| design.trial_seconds.max(1) as u64)
         .unwrap_or(120);
 
-    if crate::timer::main_timer_elapsed_seconds() < trial_seconds {
+    if humai_core::timer::main_timer_elapsed_seconds() < trial_seconds {
         return;
     }
 
@@ -419,10 +386,7 @@ fn handle_trial_timeout(app: &Humai, store: &Store, chat: &mut ChatExample) {
         current_trial_descriptor_from_state(&session)
     };
 
-    let condition = EXP_CONDITION_NAMES
-        .get(desc.condition_index)
-        .copied()
-        .unwrap_or("COOP");
+    let condition = humai_core::experiment::condition_name(desc.condition_index);
     append_message_to_chat_and_store(
         chat,
         store,
@@ -586,7 +550,7 @@ fn render_experiment_finished_popup(ctx: &egui::Context) {
     }
 
     // Safety net: ensure timer is not running while experiment is finished.
-    crate::timer::pause_main_timer();
+    humai_core::timer::pause_main_timer();
 
     let mut close_clicked = false;
     let mut download_clicked = false;
@@ -708,14 +672,14 @@ fn current_trial_memory_start_index() -> usize {
 fn agent_memory_from_chat(
     chat: &ChatExample,
     start_index: usize,
-) -> Vec<crate::agent::AgentMemoryMessage> {
+) -> Vec<humai_core::agent::AgentMemoryMessage> {
     chat.messages
         .iter()
         .skip(start_index.min(chat.messages.len()))
         .filter_map(|msg| {
             let role = match msg.source {
-                MessageSource::Human => crate::agent::AgentRole::User,
-                MessageSource::Api => crate::agent::AgentRole::Assistant,
+                MessageSource::Human => humai_core::agent::AgentRole::User,
+                MessageSource::Api => humai_core::agent::AgentRole::Assistant,
                 _ => return None,
             };
 
@@ -724,7 +688,7 @@ fn agent_memory_from_chat(
                 return None;
             }
 
-            Some(crate::agent::AgentMemoryMessage {
+            Some(humai_core::agent::AgentMemoryMessage {
                 role,
                 content: content.to_string(),
             })
@@ -742,7 +706,7 @@ fn spawn_ollama_opening_question(
     let tx = chat.inbox.sender();
     let waiting = chat.waiting_for_response().clone();
     let selected_room = chat.selected_room.clone();
-    let store_path = PathBuf::from("metrics/chat.sqlite");
+    let store_path = chat_db_path(app);
     let ollama_host = app.ollama_host.clone();
     let assistant_prompt = assistant_prompt_for_current_condition(app);
     let history_size = app.conversation_history_size;
@@ -754,7 +718,7 @@ fn spawn_ollama_opening_question(
     }
 
     app.rt_handle.spawn(async move {
-        let agent = crate::agent::HumaiAgent::new(ollama_host, model, assistant_prompt)
+        let agent = humai_core::agent::HumaiAgent::new(ollama_host, model, assistant_prompt)
             .with_history_size(history_size);
 
         let out = agent
@@ -787,7 +751,7 @@ fn spawn_ollama_opening_question(
         };
 
         if let Some(room_id) = selected_room
-            && let Ok(store) = super::store::Store::open(store_path)
+            && let Ok(store) = shared_store(&store_path)
         {
             let ts = ChatExample::display_time_for_message(&reply);
             let _ = store.append_message(&room_id, &reply, &ts);
@@ -868,7 +832,7 @@ fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample
         return;
     }
 
-    crate::timer::start_main_timer();
+    humai_core::timer::start_main_timer();
 
     let topic = design.topic.trim().to_string();
     let participant_id = design.participant_id.trim().to_string();
@@ -996,8 +960,8 @@ impl Default for InputModalState {
 }
 
 pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
-    let db_path = PathBuf::from("metrics/chat.sqlite");
-    let store = match Store::open(db_path) {
+    let db_path = chat_db_path(app);
+    let store = match shared_store(&db_path) {
         Ok(store) => store,
         Err(err) => {
             ui.colored_label(
@@ -1075,7 +1039,7 @@ pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
         chat.selected_room = rooms.first().map(|room| room.id.clone());
     }
 
-    if graph_running || crate::timer::main_timer_is_running() {
+    if graph_running || humai_core::timer::main_timer_is_running() {
         ui.ctx().request_repaint_after(Duration::from_millis(33));
     }
 
@@ -1132,7 +1096,7 @@ pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
                             .show(ui, |ui| {
                                 ui.set_min_height(row_height);
                                 ui.set_height(row_height);
-                                chat.sidebar_ui(ui);
+                                chat.sidebar_ui(ui, &store);
                             });
                     },
                 );
@@ -1289,7 +1253,7 @@ fn render_chat_rectangle(
                                             .on_hover_text("Stop timer and reset to 00:00:00")
                                             .clicked()
                                         {
-                                            crate::timer::stop_and_reset_main_timer();
+                                            humai_core::timer::stop_and_reset_main_timer();
                                             end_trial(false);
                                             end_experiment();
                                             set_experiment_running(false);
@@ -1314,13 +1278,13 @@ fn render_chat_rectangle(
                                         if ui
                                             .add_enabled(
                                                 trial_navigation_enabled
-                                                    && crate::timer::main_timer_is_running(),
+                                                    && humai_core::timer::main_timer_is_running(),
                                                 pause_btn,
                                             )
                                             .on_hover_text("Pause timer")
                                             .clicked()
                                         {
-                                            crate::timer::pause_main_timer();
+                                            humai_core::timer::pause_main_timer();
                                         }
 
                                         let play_btn = egui::Button::new(
@@ -1331,7 +1295,7 @@ fn render_chat_rectangle(
                                         if ui
                                             .add_enabled(
                                                 !awaiting_final_answer()
-                                                    && !crate::timer::main_timer_is_running(),
+                                                    && !humai_core::timer::main_timer_is_running(),
                                                 play_btn,
                                             )
                                             .on_hover_text("Start timer")
@@ -1506,7 +1470,7 @@ fn render_chat_rectangle(
                         let tx = chat.inbox.sender();
                         let waiting = chat.waiting_for_response().clone();
                         let selected_room = chat.selected_room.clone();
-                        let store_path = PathBuf::from("metrics/chat.sqlite");
+                        let store_path = chat_db_path(app);
                         let model = app.selected_ollama_model.trim().to_string();
                         let ollama_host = app.ollama_host.clone();
                         let assistant_prompt = assistant_prompt_for_current_condition(app);
@@ -1527,7 +1491,7 @@ fn render_chat_rectangle(
                                 *flag = true;
                             }
                             app.rt_handle.spawn(async move {
-                                let agent = crate::agent::HumaiAgent::new(
+                                let agent = humai_core::agent::HumaiAgent::new(
                                     ollama_host,
                                     model,
                                     assistant_prompt,
@@ -1564,7 +1528,7 @@ fn render_chat_rectangle(
                                     },
                                 };
                                 if let Some(room_id) = selected_room
-                                    && let Ok(store) = super::store::Store::open(store_path)
+                                    && let Ok(store) = shared_store(&store_path)
                                 {
                                     let ts = ChatExample::display_time_for_message(&reply);
                                     let _ = store.append_message(&room_id, &reply, &ts);
@@ -1746,8 +1710,14 @@ fn render_right_bar(
                                             if let Ok(mut design) = exp_design.lock() {
                                                 ui.add(
                                                     egui::DragValue::new(&mut design.conditions)
-                                                        .range(1..=32)
+                                                        .range(1..=humai_core::experiment::MAX_CONDITIONS as u32)
                                                         .speed(0.05),
+                                                )
+                                                .on_hover_text(
+                                                    "Humai currently supports up to 2 named conditions \
+                                                     (Cooperative and Argumentative), each with its own \
+                                                     system prompt. 1 condition runs Cooperative only, no \
+                                                     counterbalancing.",
                                                 );
                                             }
                                         });
@@ -1755,7 +1725,7 @@ fn render_right_bar(
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            ui.label("Trials:");
+                                            ui.label("Trials per condition:");
                                             if let Ok(mut design) = exp_design.lock() {
                                                 ui.add(
                                                     egui::DragValue::new(&mut design.trials)

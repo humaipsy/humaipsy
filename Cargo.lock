@@ -1713,19 +1713,33 @@ name = "humai"
 version = "0.1.3"
 dependencies = [
  "anyhow",
- "argon2",
  "catppuccin-egui",
- "chacha20poly1305",
- "chrono",
  "eframe",
  "egui",
  "egui-phosphor",
- "futures-util",
- "hkdf",
+ "humai-core",
  "ico",
  "image",
- "rand",
  "raw-window-handle",
+ "secrecy",
+ "serde_json",
+ "time",
+ "tokio",
+ "windows-sys 0.59.0",
+ "winres",
+]
+
+[[package]]
+name = "humai-core"
+version = "0.1.3"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "chacha20poly1305",
+ "chrono",
+ "futures-util",
+ "hkdf",
+ "rand",
  "reqwest",
  "rpassword",
  "rusqlite",
@@ -1735,10 +1749,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "time",
- "tokio",
  "uuid",
- "windows-sys 0.59.0",
- "winres",
 ]
 
 [[package]]

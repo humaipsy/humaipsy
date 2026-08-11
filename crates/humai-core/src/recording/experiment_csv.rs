@@ -5,6 +5,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+use crate::recording::ledger::EventLedger;
 use crate::recording::timing::now_rfc3339_utc;
 use crate::timer;
 
@@ -105,6 +106,11 @@ struct RecorderState {
     turn_index: usize,
     writer: Option<BufWriter<std::fs::File>>,
     active_csv_path: Option<PathBuf>,
+    /// Reproducible-audit-trail sibling of the CSV: every row `emit()` writes
+    /// to the CSV is also appended here as a JSONL event, keyed by
+    /// (experiment_id, run_id) so a new experiment run gets its own ledger.
+    ledger: Option<EventLedger>,
+    ledger_key: Option<(String, String)>,
 }
 
 static RECORDER: OnceLock<Mutex<RecorderState>> = OnceLock::new();
@@ -412,7 +418,72 @@ fn build_row(
     }
 }
 
+/// Opens (or reuses) the event ledger for the current session's
+/// (experiment_id, run_id) under `<output_dir>/runs/<experiment_id>/<run_id>/`.
+/// No-op if there is no active session yet (e.g. the `ExperimentConfigured`
+/// row emitted before a session exists).
+fn ensure_ledger(state: &mut RecorderState) {
+    let Some(session) = state.session.clone() else {
+        return;
+    };
+    let key = (session.experiment_id.clone(), session.run_id.clone());
+    if state.ledger_key.as_ref() == Some(&key) && state.ledger.is_some() {
+        return;
+    }
+
+    let run_dir = state
+        .config
+        .output_path()
+        .join("runs")
+        .join(&session.experiment_id)
+        .join(&session.run_id);
+    match EventLedger::open(run_dir, session.experiment_id, session.run_id) {
+        Ok(ledger) => {
+            state.ledger = Some(ledger);
+            state.ledger_key = Some(key);
+        }
+        Err(e) => {
+            eprintln!("[ExperimentCSV] failed to open event ledger: {e}");
+            state.ledger = None;
+            state.ledger_key = None;
+        }
+    }
+}
+
+/// Mirrors one CSV row into the JSONL event ledger, using the CSV's own
+/// `event` name as the ledger event type so the two stay trivially
+/// cross-referenceable.
+fn ledger_append(state: &mut RecorderState, row: &EventRow) {
+    ensure_ledger(state);
+    let Some(ledger) = state.ledger.as_ref() else {
+        return;
+    };
+
+    let model = (!row.model.is_empty()).then(|| row.model.clone());
+    let input = row.transcript_human.as_str();
+    let output = if !row.transcript_ai.is_empty() {
+        row.transcript_ai.as_str()
+    } else {
+        row.final_answer.as_str()
+    };
+    let payload = serde_json::json!({
+        "participant_id": row.participant_id,
+        "condition": row.condition,
+        "block": row.block,
+        "trial_elapsed_secs": row.trial_elapsed_secs,
+        "timeout": row.timeout,
+        "turn_index": row.turn_index,
+        "duration_ms": row.duration_ms,
+        "success": row.success,
+        "error": row.error,
+    });
+    if let Err(e) = ledger.append_with_hashes(&row.event, None, model, input, output, payload) {
+        eprintln!("[ExperimentCSV] failed to append ledger event: {e}");
+    }
+}
+
 fn emit(state: &mut RecorderState, row: EventRow) {
+    ledger_append(state, &row);
     write_row(state, row);
 }
 
@@ -525,6 +596,12 @@ pub fn end_experiment() {
         }
         let row = build_row(&state, "ExperimentEnd", None, None, None, None, None, None);
         emit(&mut state, row);
+        if let Some(ledger) = state.ledger.take()
+            && let Err(e) = ledger.try_finalize_run_stopped("experiment_complete")
+        {
+            eprintln!("[ExperimentCSV] failed to finalize event ledger: {e}");
+        }
+        state.ledger_key = None;
         state.session = None;
         state.trial = None;
         state.turn_index = 0;
@@ -710,6 +787,28 @@ mod tests {
         assert!(raw.contains("Hello human"));
         assert!(raw.contains(",500,"));
         assert!(!raw.contains("ttft_ms"));
+
+        // Every CSV row emitted above should also have landed in the JSONL
+        // event ledger under runs/<experiment_id>/<run_id>/, and
+        // end_experiment() should have finalized it (system.run_stopped +
+        // summary.json) — this is the audit-trail sibling to the CSV that
+        // used to be dead code (recording::ledger had zero callers).
+        let run_dir = tmp.path().join("runs").join("exp_test").join("run_test");
+        let events_raw = fs::read_to_string(run_dir.join("events.jsonl")).expect("read ledger events");
+        let event_lines: Vec<&str> = events_raw.lines().collect();
+        assert!(
+            event_lines.len() >= 6,
+            "expected at least as many ledger events as CSV rows, got {}",
+            event_lines.len()
+        );
+        assert!(events_raw.contains("\"event_type\":\"ExperimentStart\""));
+        assert!(events_raw.contains("\"event_type\":\"TrialStart\""));
+        assert!(events_raw.contains("\"event_type\":\"system.run_stopped\""));
+        assert!(events_raw.contains("\"experiment_id\":\"exp_test\""));
+
+        let summary_raw = fs::read_to_string(run_dir.join("summary.json")).expect("read ledger summary");
+        assert!(summary_raw.contains("\"experiment_id\": \"exp_test\""));
+        assert!(summary_raw.contains("\"run_id\": \"run_test\""));
     }
 
     #[test]
