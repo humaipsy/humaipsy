@@ -1,6 +1,6 @@
 # Humai
 
-(Under heavy development)
+🤖 Humai, application for running scientific Human-AI Interaction (HCI) experiments.
 
 Features:
 
