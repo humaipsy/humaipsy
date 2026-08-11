@@ -1,0 +1,59 @@
+name: Release macOS
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-macos:
+    # GitHub's macos-latest runner is Apple Silicon (arm64) as of macOS 14.
+    # This produces an arm64-only binary; add an x86_64-apple-darwin job here
+    # (or a lipo-merged universal build) if Intel Mac support is needed later.
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth 1 origin "${GITHUB_REF_NAME}"
+          git checkout FETCH_HEAD
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Set release artifact name
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "ARTIFACT_NAME=humai-${version}-mac" >> "$GITHUB_ENV"
+
+      - name: Build distribution
+        env:
+          HUMAI_DIST_DIR: ${{ github.workspace }}/dist/${{ env.ARTIFACT_NAME }}
+        run: ./distribute_app.sh
+
+      - name: Package release archive
+        run: |
+          cd dist
+          tar czf "${ARTIFACT_NAME}.tar.gz" -C "${ARTIFACT_NAME}" .
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" \
+              "dist/${ARTIFACT_NAME}.tar.gz" \
+              --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              "dist/${ARTIFACT_NAME}.tar.gz" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi
