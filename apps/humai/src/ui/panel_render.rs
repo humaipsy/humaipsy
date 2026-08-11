@@ -8,7 +8,7 @@ impl Humai {
         let panel_border_color = ui.visuals().widgets.noninteractive.bg_stroke.color;
         let panel = egui::Frame::default()
             .fill(ui.visuals().panel_fill)
-            .stroke(egui::Stroke::new(1.0, panel_border_color))
+            .stroke(egui::Stroke::new(1.0_f32, panel_border_color))
             .corner_radius(4.0)
             .inner_margin(egui::Margin::same(6));
 

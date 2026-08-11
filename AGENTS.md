@@ -5,8 +5,8 @@ repo root points here — this file is the canonical reference.
 
 ## What this is
 
-Humai is a cross-platform (Windows + Linux) desktop application for running Human-AI
-Interaction / HCI experiments. It is a single Rust binary built with `eframe`/`egui`,
+Humai is a cross-platform (Windows + Linux + macOS) desktop application for running
+Human-AI Interaction / HCI experiments. It is a single Rust binary built with `eframe`/`egui`,
 talks to a local or remote [Ollama](https://ollama.com) server for model inference, and
 records experiment trials to CSV plus a local SQLite chat log. There is no server
 component and no build step beyond `cargo` — the whole product is `apps/humai`.
@@ -19,7 +19,8 @@ dependencies without checking the license is compatible.
 ```
 Cargo.toml                 # workspace root, members = ["apps/humai"]
 apps/humai/                # the only workspace member — the actual app
-  Cargo.toml                # package manifest (version is the release version, e.g. 0.1.2)
+  Cargo.toml                # package manifest (version is the release version, e.g. 0.1.3)
+  .cargo/config.toml        # target-dir = "target" so `cargo` works from this dir without -p
   build.rs                  # Windows-only: generates the .ico and embeds it as a resource
   src/
     main.rs                  # entry point: Tokio runtime + eframe::run_native
@@ -30,31 +31,49 @@ apps/humai/                # the only workspace member — the actual app
     vault.rs                  # master-password gate (Argon2id) + encrypted Vault blob —
                                 #   pure logic, no egui/UI dependency (rendering lives in
                                 #   ui/vault_panel.rs; keep it that way, see below)
-    timer.rs                  # trial countdown timer used by the experiment UI
+    timer.rs                  # process-global trial countdown timer used by the experiment UI
     window_icon.rs             # platform-split: Win32 SendMessage icons vs egui IconData
-    ollama/                   # Ollama HTTP client, chat engine, model discovery
-    recording/                # experiment_csv (per-trial rows), ledger, audit, timing, metrics
+    sync_ext.rs                # MutexExt/RwLockExt poison-recovering lock accessors (see Locking below)
+    ollama/                   # Ollama HTTP client, streaming chat engine, model discovery
+    recording/                # experiment_csv (the active per-trial-event CSV writer), timing,
+                                #   metrics (re-export shim); ledger.rs + audit.rs are unwired
+                                #   scaffolding for a future audit-bundle feature — see Experiment
+                                #   recording below before assuming either is on the write path
     ui/                        # egui panels: settings, design, overview chat, vault unlock UI
-      overview_chat/            # chat UI + SQLite-backed message store (rusqlite, "chat.sqlite")
+      overview_chat/            # experiment engine + chat UI (largest module, ~2k-line panel.rs) +
+                                #   SQLite-backed message store (rusqlite, "chat.sqlite")
       vault_panel.rs            # renders MasterVault; the only file that may import egui
                                 #   *and* crate::vault together
-  assets/                    # window/topbar icon PNGs (source of truth; .ico is generated)
+    bin/
+      gen_master_hash.rs         # standalone binary: interactively writes vault/.master_hash
+  assets/                    # window/topbar icon PNGs + bundled NotoEmoji-Regular.ttf (source of
+                                #   truth; the Windows .ico is generated from icon_window_bar.png)
   vault/.master_hash          # gitignored — local Argon2id hash file, created on first run
   metrics/                    # gitignored except structure — CSV exports + chat.sqlite land here
 distribute_app.sh / .bat    # build release + stage a standalone dist/ folder (see below)
 run_app.sh / .bat           # `cargo clean && cargo run` — quick dev loop
-.github/workflows/ci.yml               # runs on every push to main + every PR: check/test/clippy on Linux + Windows
+.github/workflows/ci.yml               # runs on every push to main + every PR: check/test/clippy on Linux + Windows + macOS
 .github/workflows/release-linux.yml   # tag-triggered Linux release build + GitHub Release upload
 .github/workflows/release-windows.yml # tag-triggered Windows release build + GitHub Release upload
+.github/workflows/release-macos.yml   # tag-triggered macOS (arm64) release build + GitHub Release upload
 ```
 
-Both release workflows fire on a `v*` tag push and upload to the GitHub Release for
-that tag: `release-linux.yml` produces `humai-<version>-ubu.tar.gz`,
-`release-windows.yml` produces `humai-<version>-win.zip` (`<version>` is the tag with
-its leading `v` stripped, e.g. tag `v0.1.2` → `humai-0.1.2-ubu`/`humai-0.1.2-win`). Keep
-these two workflows in parity the same way `distribute_app.sh`/`.bat` are kept in
-parity — they both wrap the corresponding distribute script with a versioned
-`HUMAI_DIST_DIR`, then archive and upload it.
+For a narrative walkthrough of how these modules fit together — process model, the
+experiment engine's trial/condition logic, storage formats, security model — see
+[ARCHITECTURE.md](ARCHITECTURE.md).
+
+All three release workflows fire on a `v*` tag push and upload to the GitHub Release
+for that tag: `release-linux.yml` produces `humai-<version>-ubu.tar.gz`,
+`release-windows.yml` produces `humai-<version>-win.zip`, `release-macos.yml` produces
+`humai-<version>-mac.tar.gz` (`<version>` is the tag with its leading `v` stripped,
+e.g. tag `v0.1.2` → `humai-0.1.2-{ubu,win,mac}`). The macOS build runs on GitHub's
+`macos-latest` runner, which is Apple Silicon (arm64) — there is currently no
+Intel/x86_64 macOS build; add a second job to `release-macos.yml` (or a
+`lipo`-merged universal binary) if that's ever needed. Keep these three workflows in
+parity the same way `distribute_app.sh`/`.bat` are kept in parity — Linux and macOS
+both wrap `distribute_app.sh` (it's plain POSIX bash, no Linux-specific bits) and
+Windows wraps `distribute_app.bat`, each with a versioned `HUMAI_DIST_DIR`, then
+archive and upload the result.
 
 ## Cross-platform rules (read this before touching platform-sensitive code)
 
@@ -246,8 +265,9 @@ maintain multiple release lines in parallel, e.g. patching an old version while 
 has diverged; not the case here). The flow: bump `version` in `apps/humai/Cargo.toml`
 (and let `Cargo.lock` update) on its own short-lived branch, PR it into `main` like any
 other change, then tag `vX.Y.Z` at that merge commit on `main` and push the tag — that
-fires `release-linux.yml`/`release-windows.yml`, which build and upload
-`humai-<version>-ubu.tar.gz`/`humai-<version>-win.zip` to the tag's GitHub Release.
+fires `release-linux.yml`/`release-windows.yml`/`release-macos.yml`, which build and
+upload `humai-<version>-ubu.tar.gz`/`humai-<version>-win.zip`/`humai-<version>-mac.tar.gz`
+to the tag's GitHub Release.
 
 ## Things to leave alone unless explicitly asked
 

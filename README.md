@@ -18,7 +18,7 @@ Features:
 - Cargo (bundled with Rust toolchain)
 
 
-## Reproduce
+## Development
 
 Development 
 
@@ -31,7 +31,7 @@ Development
 ./run_app.sh
 
 # Manually
-cd ./apps/arpsci
+cd ./apps/humai
 
 # Fast compile check (all bins and tests)
 cargo check --all-targets
@@ -53,7 +53,6 @@ cargo fmt
 cargo clippy --all-targets -- -D warnings
 
 ```
-
 
 </details>
 

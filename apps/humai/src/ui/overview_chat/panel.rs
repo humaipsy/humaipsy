@@ -1106,7 +1106,7 @@ pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
     let split_height = ui.available_height() - 20.0;
     egui::Frame::default()
         .stroke(egui::Stroke::new(
-            1.0,
+            1.0_f32,
             ui.visuals().widgets.noninteractive.bg_stroke.color,
         ))
         .inner_margin(egui::Margin::same(6))
@@ -1125,7 +1125,7 @@ pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
                     |ui| {
                         egui::Frame::default()
                             .stroke(egui::Stroke::new(
-                                1.0,
+                                1.0_f32,
                                 ui.visuals().widgets.noninteractive.bg_stroke.color,
                             ))
                             .inner_margin(egui::Margin::same(0))
@@ -1232,7 +1232,7 @@ fn render_chat_rectangle(
     ui.set_height(row_height);
     egui::Frame::default()
         .stroke(egui::Stroke::new(
-            1.0,
+            1.0_f32,
             ui.visuals().widgets.noninteractive.bg_stroke.color,
         ))
         .inner_margin(egui::Margin::same(0))
@@ -1246,7 +1246,7 @@ fn render_chat_rectangle(
             let top_gap = 6.0;
             let bottom_gap = 6.0;
             let bar_fill = ui.visuals().faint_bg_color;
-            let bar_stroke = egui::Stroke::new(1.0, ui.visuals().strong_text_color());
+            let bar_stroke = egui::Stroke::new(1.0_f32, ui.visuals().strong_text_color());
 
             egui::Frame::new()
                 .inner_margin(egui::Margin::same(4))
@@ -1378,7 +1378,7 @@ fn render_chat_rectangle(
                                                             egui::Frame::new()
                                                                 .fill(ui.visuals().widgets.inactive.bg_fill)
                                                                 .stroke(egui::Stroke::new(
-                                                                    0.5,
+                                                                    0.5_f32,
                                                                     ui.visuals().widgets.noninteractive.bg_stroke.color,
                                                                 ))
                                                                 .corner_radius(egui::CornerRadius::same(2))
@@ -1403,7 +1403,7 @@ fn render_chat_rectangle(
                                                             egui::Frame::new()
                                                                 .fill(ui.visuals().extreme_bg_color)
                                                                 .stroke(egui::Stroke::new(
-                                                                    0.5,
+                                                                    0.5_f32,
                                                                     ui.visuals().widgets.noninteractive.bg_stroke.color,
                                                                 ))
                                                                 .corner_radius(egui::CornerRadius::same(2))
@@ -1592,7 +1592,7 @@ fn render_right_bar(
 ) {
     egui::Frame::default()
         .stroke(egui::Stroke::new(
-            1.0,
+            1.0_f32,
             ui.visuals().widgets.noninteractive.bg_stroke.color,
         ))
         .inner_margin(egui::Margin::same(6))
@@ -1647,7 +1647,7 @@ fn render_right_bar(
                                 ui.set_max_width(left_width);
                                 egui::Frame::default()
                                     .stroke(egui::Stroke::new(
-                                        1.0,
+                                        1.0_f32,
                                         ui.visuals().widgets.noninteractive.bg_stroke.color,
                                     ))
                                     .inner_margin(egui::Margin::same(6))
@@ -1702,7 +1702,7 @@ fn render_right_bar(
                                 ui.set_max_width(middle_width);
                                 egui::Frame::default()
                                     .stroke(egui::Stroke::new(
-                                        1.0,
+                                        1.0_f32,
                                         ui.visuals().widgets.noninteractive.bg_stroke.color,
                                     ))
                                     .inner_margin(egui::Margin::same(6))
