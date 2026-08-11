@@ -1,5 +1,7 @@
 # Humai
 
+[![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org) [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE) [![CI](https://github.com/vecnode/humai/actions/workflows/ci.yml/badge.svg)](https://github.com/vecnode/humai/actions/workflows/ci.yml)
+
 🤖 Humai, application for running scientific Human-AI Interaction (HCI) experiments.
 
 Features:
@@ -63,4 +65,7 @@ cargo clippy --all-targets -- -D warnings
 
 ## License
 
-Proprietary
+Copyright (C) 2026 Luís Arandas and Olga Sutskova
+
+Licensed under the GNU General Public License v3.0 (or later) — see [LICENSE](LICENSE)
+for the full text.

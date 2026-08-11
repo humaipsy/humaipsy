@@ -4,6 +4,7 @@ description = "Humai's engine: agent prompting, Ollama client, experiment record
 version = "0.1.3"
 edition = "2024"
 rust-version = "1.85"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 anyhow = "1.0"
