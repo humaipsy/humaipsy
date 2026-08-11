@@ -60,14 +60,25 @@ crates/humai-core/          Library crate — zero egui/eframe dependency
     lib.rs                    Module tree / public API
     agent.rs                  HumaiAgent: builds instruction/input prompts for two call
                               shapes (opening question, memory-conditioned reply) and calls
-                              ollama::send_to_ollama; sentence-count clamping on output
+                              provider::Provider::chat; sentence-count clamping on output
     chat_types.rs               Pure chat data types shared by the Store and the UI's
                               ChatExample: ChatMessage, Room, MessageSource,
                               AssistantGeneration, MessageCorrelation, UiInbox<T>
     experiment/                  Trial-sequencing/counterbalancing engine — pure,
                               parameterized functions (no process-global state), unit
                               tested directly. See "Experiment engine" below.
-    ollama/                        Ollama HTTP client + streaming chat engine
+    provider/                      Backend-agnostic chat-completion abstraction —
+                              see "Provider abstraction" below. HumaiAgent depends on
+                              this, not on ollama:: directly.
+      mod.rs                        Provider trait (id, chat, list_models), ChatRequest,
+                              ChatResponse
+      ollama_provider.rs             OllamaProvider — the only impl today, a thin
+                              adapter over ollama:: below
+      token_budget.rs                 Approximate (character-based) conversation-
+                              history trimming, provider-agnostic
+    ollama/                        Ollama HTTP client + streaming chat engine — unchanged
+                              by the provider abstraction, still the only thing that
+                              actually speaks HTTP to a model backend
       mod.rs                        Public API: send_to_ollama, fetch_ollama_models,
                               test_ollama, HttpPolicy (air-gap enforcement),
                               DEFAULT_OLLAMA_MODEL, timing/usage types
@@ -86,7 +97,7 @@ crates/humai-core/          Library crate — zero egui/eframe dependency
     store.rs / store_schema.rs           SQLite persistence for chat transcripts
                               (rusqlite, chat.sqlite), idempotent schema migration
     sync_ext.rs                            MutexExt/RwLockExt poison-recovering lock
-                              accessors, used by both crates
+                              accessors, used by all three crates
     timer.rs                                Process-global trial countdown timer
                               (start/pause/reset)
     vault.rs                                 Master-password gate (Argon2id) +
@@ -176,6 +187,30 @@ After the last trial the participant is prompted for a free-text final answer, t
 experiment is marked complete, and the operator can copy the just-written CSV to the
 Desktop directly from the completion popup (`copy_experiment_csv_to_desktop`,
 cross-platform via `HOME`/`USERPROFILE`).
+
+## Provider abstraction
+
+`humai_core::agent::HumaiAgent` — the thing that actually builds prompts and asks
+for a completion — depends on `humai_core::provider::Provider`, not on Ollama by
+name. `Provider` is a small `async-trait` trait (`id`, `chat`, `list_models`); the
+only implementation today is `provider::ollama_provider::OllamaProvider`, a thin
+adapter that calls straight into the `ollama::` module below with no new HTTP logic
+of its own. Adding a second backend (OpenAI, Anthropic, ...) later means writing a
+new `impl Provider`, not touching `agent.rs` or the two `HumaiAgent::new(...)` call
+sites in `apps/humai/src/ui/overview_chat/panel.rs` — both construct an
+`Arc<dyn Provider>` (currently always an `OllamaProvider`) and hand it to the agent.
+No second backend exists yet; this is a seam, not a feature.
+
+`ChatRequest.max_output_tokens` is the "cut the tokens" control promoted to the
+trait level — it maps directly onto Ollama's existing `num_predict` generation-limit
+option, so every future provider takes the same field instead of inventing its own.
+On the input side, `provider::token_budget::trim_to_token_budget` is a second,
+optional, *approximate* trim `HumaiAgent::with_token_budget(n)` can apply on top of
+the existing message-count-based `history_size` window — approximate because there's
+no real tokenizer wired up for any backend here (Ollama models and any future
+OpenAI/Anthropic backend all tokenize differently); it's a ~4-characters-per-token
+heuristic, documented as such, not a guarantee of fitting a specific context window.
+Calling neither of these keeps behavior identical to before the abstraction existed.
 
 ## Ollama integration
 

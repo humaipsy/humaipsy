@@ -37,7 +37,8 @@ crates/humai-core/                 # library crate — zero egui/eframe dependen
   Cargo.toml
   src/
     lib.rs                          # module tree / public API
-    agent.rs                         # `HumaiAgent`: prompt construction + calls into ollama::
+    agent.rs                         # `HumaiAgent`: prompt construction + calls into
+                                       #   provider::Provider::chat (not ollama:: directly)
     chat_types.rs                      # ChatMessage/Room/MessageSource/AssistantGeneration/
                                        #   MessageCorrelation/UiInbox — shared by store.rs and
                                        #   apps/humai's ChatExample (which does the egui rendering)
@@ -45,7 +46,12 @@ crates/humai-core/                 # library crate — zero egui/eframe dependen
                                        #   parameterized, unit-tested, no process-global state.
                                        #   apps/humai/src/ui/overview_chat/panel.rs delegates its
                                        #   condition/trial math here instead of hardcoding it.
-    ollama/                                # Ollama HTTP client, chat engine, model discovery
+    provider/                              # backend-agnostic chat-completion trait +
+                                       #   token budgeting. ollama_provider.rs is the only
+                                       #   impl today — see "Adding a new provider" below.
+    ollama/                                # Ollama HTTP client, chat engine, model discovery —
+                                       #   unchanged by the provider abstraction; still the
+                                       #   only thing that speaks HTTP to a model backend
     recording/                              # experiment_csv (CSV writer + JSONL ledger mirror),
                                        #   ledger (JSONL event log + summary/manifest hashing —
                                        #   wired into experiment_csv, not standalone), timing, metrics
@@ -140,6 +146,17 @@ nothing needs staging into `dist/` for the dashboard to work in a distributed bu
   at the trial-lifecycle points) is the pattern for feeding new status fields
   through: add to `WebStatusSnapshot`, populate it in `update_web_status`, done — no
   changes needed on the `humai-web` side for a field that's just carried through.
+- **If it's a new model backend (OpenAI, Anthropic, ...), it's a new
+  `impl Provider` in `crates/humai-core/src/provider/`, modeled on
+  `ollama_provider.rs`.** Do not add a second field to `HumaiAgent` or an `if
+  self.backend == ...` branch anywhere — the entire reason `Provider` exists is so
+  `agent.rs` and its callers never need to know which backend is active. A new
+  provider should call whatever HTTP/SDK client it needs itself (mirroring how
+  `OllamaProvider` calls into `ollama::`, not by extending the `ollama` module to
+  handle a second service) and honor `ChatRequest.max_output_tokens` the way
+  `OllamaProvider` maps it onto Ollama's `num_predict`. As of this writing exactly
+  one provider exists (Ollama) — this guidance is for when that changes, not a
+  hint that more should be added speculatively now.
 - **Known state-management debt** (documented in ARCHITECTURE.md's "Known
   Limitations", not something to extend): `apps/humai/src/ui/overview_chat/panel.rs`
   and `chat.rs` still hold experiment/chat UI state (current trial, chat rooms,
