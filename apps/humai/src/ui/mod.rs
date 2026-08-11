@@ -36,6 +36,10 @@ impl Default for OllamaUiState {
 #[derive(Default)]
 pub(crate) struct HumaiUiState {
 	pub(crate) ollama: OllamaUiState,
+	/// Resizable sidebar/chat layout for the Overview tab. `None` until first
+	/// rendered, then built once and persisted here (it holds the user's
+	/// drag-to-resize position) — see `overview_chat::panel::build_overview_tiles_tree`.
+	pub(crate) overview_tiles: Option<egui_tiles::Tree<overview_chat::panel::OverviewPane>>,
 }
 
 /// Bundled so emoji in Ollama responses render identically on Windows and Linux,

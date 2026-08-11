@@ -3,6 +3,7 @@
 use crate::app_state::AppState;
 use humai_core::metrics::MetricsConfig;
 use humai_core::ollama::HttpPolicy;
+use std::net::SocketAddr;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::runtime::Handle;
@@ -48,6 +49,20 @@ pub struct Humai {
     pub(crate) chat_mode: GlobalChatMode,
     /// Global UI theme for catppuccin egui shell.
     pub(crate) catppuccin_theme: CatppuccinTheme,
+    /// Live status the local read-only web dashboard (`humai-web`) serves.
+    /// The dashboard's chat transcript comes straight from the SQLite Store
+    /// (same one the desktop app writes to) rather than through this field —
+    /// this only carries the "what trial/condition are we on" summary that
+    /// isn't durably recorded anywhere else to read back.
+    pub(crate) web_status: humai_web::SharedWebStatus,
+    /// The address the web dashboard was configured to bind, or `None` if
+    /// `HUMAI_WEB_DISABLED` was set. Shown in Settings so the URL is
+    /// discoverable without reading docs. This reflects what was *attempted*,
+    /// not confirmed-bound — the bind itself happens asynchronously in the
+    /// spawned server task, after `Humai::new()` has already returned; a
+    /// failure there (e.g. the port is already in use) is logged to stderr,
+    /// not surfaced in the UI.
+    pub(crate) web_dashboard_addr: Option<SocketAddr>,
 }
 
 impl Humai {
@@ -63,9 +78,14 @@ impl Humai {
             "Experimental condition ARGUM: be argumentative with the human participant. You must challenge assumptions, present counterpoints, and disagree when appropriate. Do NOT use a supportive or reassuring therapeutic style.".to_string()
         });
 
+        let web_status = humai_web::new_shared_status();
+        let web_dashboard_addr = spawn_web_dashboard(&rt_handle, &metrics_config, web_status.clone());
+
         Self {
             rt_handle,
             app_state,
+            web_status,
+            web_dashboard_addr,
             selected_ollama_model: std::env::var("OLLAMA_MODEL").unwrap_or_default(),
             assistant_prompt: std::env::var("HUMAI_ASSISTANT_PROMPT").unwrap_or_else(|_| {
                 "You are HumaiAgent, the experiment assistant for human-to-agent conversations. Be clear, neutral, and helpful. Keep responses concise and actionable when possible.".to_string()
@@ -96,4 +116,55 @@ impl Humai {
         self.app_state
             .update_metrics_config(self.metrics_config.clone());
     }
+}
+
+const DEFAULT_WEB_DASHBOARD_BIND: &str = "127.0.0.1:8787";
+
+/// Spawns the local read-only web dashboard (`humai-web`) onto `rt_handle`,
+/// unless `HUMAI_WEB_DISABLED` is set. Bound to loopback only by default
+/// (`HUMAI_WEB_BIND` to override) — experiment transcripts are potentially
+/// sensitive human-subjects data, so inbound exposure gets the same opt-in
+/// caution the outbound air-gap policy already applies. A bind failure (e.g.
+/// the port is already in use) is logged to stderr and otherwise ignored —
+/// the desktop app must still start regardless of dashboard availability.
+fn spawn_web_dashboard(
+    rt_handle: &Handle,
+    metrics_config: &MetricsConfig,
+    status: humai_web::SharedWebStatus,
+) -> Option<SocketAddr> {
+    if parse_bool_env("HUMAI_WEB_DISABLED") {
+        return None;
+    }
+
+    let bind_addr: SocketAddr = std::env::var("HUMAI_WEB_BIND")
+        .ok()
+        .and_then(|raw| raw.trim().parse().ok())
+        .unwrap_or_else(|| {
+            DEFAULT_WEB_DASHBOARD_BIND
+                .parse()
+                .expect("DEFAULT_WEB_DASHBOARD_BIND is a valid socket address")
+        });
+    // Mirrors chat_db_path() in ui/overview_chat/panel.rs: the dashboard reads
+    // the same chat.sqlite the desktop app writes to, under the configurable
+    // metrics output dir rather than a separately hardcoded path.
+    let chat_db_path = metrics_config.output_path().join("chat.sqlite");
+
+    rt_handle.spawn(async move {
+        let config = humai_web::WebServerConfig {
+            bind_addr,
+            chat_db_path,
+            status,
+        };
+        if let Err(e) = humai_web::serve(config).await {
+            eprintln!("[humai-web] dashboard server failed to start on {bind_addr}: {e}");
+        }
+    });
+
+    Some(bind_addr)
+}
+
+fn parse_bool_env(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
 }

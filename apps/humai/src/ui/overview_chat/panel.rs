@@ -136,6 +136,45 @@ fn experiment_status_label(state: &ExperimentSessionState) -> String {
     )
 }
 
+/// Refreshes `app.web_status`, the snapshot the local read-only web dashboard
+/// (`humai-web`) polls. Called at the trial-lifecycle points that already
+/// mutate `EXPERIMENT_SESSION` (session start, each trial advance/timeout,
+/// finalization) — not on every frame, since nothing here changes between
+/// those points.
+fn update_web_status(app: &Humai) {
+    let design = current_design();
+    let state = EXPERIMENT_SESSION
+        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+
+    let (condition_label, trial_in_condition, total_trials) =
+        if state.configured && !state.awaiting_final_answer && !state.experiment_complete {
+            let desc = current_trial_descriptor_from_state(&state);
+            let condition = humai_core::experiment::condition_name(desc.condition_index);
+            (
+                humai_core::experiment::condition_label(condition).to_string(),
+                desc.trial_in_condition + 1,
+                total_experiment_trials(),
+            )
+        } else {
+            (String::new(), 0, 0)
+        };
+
+    let snapshot = humai_web::WebStatusSnapshot {
+        design_name: design.name,
+        participant_id: design.participant_id,
+        condition_label,
+        trial_in_condition,
+        total_trials,
+        running: state.running,
+        timer_display: humai_core::timer::main_timer_display(),
+    };
+
+    *app.web_status.lock_recover() = snapshot;
+}
+
 fn condition_instruction_for_state(
     state: &ExperimentSessionState,
     coop_prompt: &str,
@@ -263,7 +302,7 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
             .unwrap_or_default();
 
         if final_question.is_empty() {
-            finalize_experiment(chat, store);
+            finalize_experiment(app, chat, store);
         } else if let Ok(mut session) = EXPERIMENT_SESSION
             .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
             .lock()
@@ -283,6 +322,7 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
             );
         }
 
+        update_web_status(app);
         return;
     }
 
@@ -293,6 +333,7 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
     let condition = humai_core::experiment::condition_name(desc.condition_index);
     let session_meta = session_metadata_from_state(&session);
     drop(session);
+    update_web_status(app);
 
     if let Some(session_meta) = session_meta {
         begin_trial(
@@ -468,7 +509,7 @@ fn experiment_complete() -> bool {
         .unwrap_or(false)
 }
 
-fn finalize_experiment(chat: &mut ChatExample, store: &Store) {
+fn finalize_experiment(app: &Humai, chat: &mut ChatExample, store: &Store) {
     if let Ok(mut state) = EXPERIMENT_SESSION
         .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
         .lock()
@@ -482,6 +523,7 @@ fn finalize_experiment(chat: &mut ChatExample, store: &Store) {
     }
 
     end_experiment();
+    update_web_status(app);
     append_message_to_chat_and_store(
         chat,
         store,
@@ -496,7 +538,7 @@ fn finalize_experiment(chat: &mut ChatExample, store: &Store) {
     );
 }
 
-fn submit_final_answer(chat: &mut ChatExample, store: &Store, answer: &str) {
+fn submit_final_answer(app: &Humai, chat: &mut ChatExample, store: &Store, answer: &str) {
     {
         let mut should_finalize = false;
         if let Ok(mut state) = EXPERIMENT_SESSION
@@ -515,7 +557,7 @@ fn submit_final_answer(chat: &mut ChatExample, store: &Store, answer: &str) {
     }
 
     record_final_answer(answer);
-    finalize_experiment(chat, store);
+    finalize_experiment(app, chat, store);
 }
 
 fn copy_experiment_csv_to_desktop() -> Result<PathBuf, String> {
@@ -877,6 +919,7 @@ fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample
 
     // Release the lock before creating prompts that also read experiment state.
     drop(session);
+    update_web_status(app);
 
     append_message_to_chat_and_store(
         chat,
@@ -959,7 +1002,64 @@ impl Default for InputModalState {
     }
 }
 
-pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
+/// The Overview tab's two resizable panels. Replaces a previously hardcoded
+/// 140px-wide sidebar split — the divider is now user-draggable via
+/// `egui_tiles`, and the `Tree` (which is what remembers the drag position)
+/// is persisted on `HumaiUiState`, not rebuilt every frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OverviewPane {
+    Sidebar,
+    Chat,
+}
+
+pub(crate) fn build_overview_tiles_tree() -> egui_tiles::Tree<OverviewPane> {
+    let mut tiles = egui_tiles::Tiles::default();
+    let sidebar = tiles.insert_pane(OverviewPane::Sidebar);
+    let chat = tiles.insert_pane(OverviewPane::Chat);
+    let root = tiles.insert_horizontal_tile(vec![sidebar, chat]);
+    egui_tiles::Tree::new("overview_tiles", root, tiles)
+}
+
+/// Dispatches each pane to the existing rendering functions unchanged — this
+/// is a resizable-container swap, not a rewrite of what's rendered inside.
+struct OverviewPanesBehavior<'a> {
+    app: &'a mut Humai,
+    store: &'a Store,
+    chat: &'a mut ChatExample,
+    human_to_agent_mode: bool,
+}
+
+impl egui_tiles::Behavior<OverviewPane> for OverviewPanesBehavior<'_> {
+    fn tab_title_for_pane(&mut self, pane: &OverviewPane) -> egui::WidgetText {
+        match pane {
+            OverviewPane::Sidebar => "Rooms".into(),
+            OverviewPane::Chat => "Chat".into(),
+        }
+    }
+
+    fn pane_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        _tile_id: egui_tiles::TileId,
+        pane: &mut OverviewPane,
+    ) -> egui_tiles::UiResponse {
+        match pane {
+            OverviewPane::Sidebar => {
+                self.chat.sidebar_ui(ui, self.store);
+            }
+            OverviewPane::Chat => {
+                render_chat_columns(self.app, ui, self.store, self.chat, self.human_to_agent_mode);
+            }
+        }
+        egui_tiles::UiResponse::None
+    }
+}
+
+pub(crate) fn render_overview_panel(
+    app: &mut Humai,
+    ui: &mut egui::Ui,
+    ui_state: &mut crate::ui::HumaiUiState,
+) {
     let db_path = chat_db_path(app);
     let store = match shared_store(&db_path) {
         Ok(store) => store,
@@ -1067,6 +1167,13 @@ pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
     });
     ui.add_space(4.0);
 
+    // persist_and_hydrate_selected_room only reads/writes chat.selected_room and
+    // chat.messages (set up above, before this point) — it doesn't need to run
+    // "between" the sidebar and chat panes, just once per frame before either
+    // renders, so it's pulled out of the tile tree entirely rather than trying
+    // to make it happen at a specific point in egui_tiles' render order.
+    persist_and_hydrate_selected_room(&store, &rooms, &mut chat, active_room_id);
+
     let split_height = ui.available_height() - 20.0;
     egui::Frame::default()
         .stroke(egui::Stroke::new(
@@ -1077,42 +1184,16 @@ pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             ui.set_min_height(split_height);
             ui.set_height(split_height);
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                let left_rect_width = 140.0;
-                let row_height = ui.available_height();
-                let right_rect_width =
-                    (ui.available_width() - left_rect_width - ui.spacing().item_spacing.x).max(0.0);
-
-                ui.allocate_ui_with_layout(
-                    egui::vec2(left_rect_width, row_height),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        egui::Frame::default()
-                            .stroke(egui::Stroke::new(
-                                1.0_f32,
-                                ui.visuals().widgets.noninteractive.bg_stroke.color,
-                            ))
-                            .inner_margin(egui::Margin::same(0))
-                            .show(ui, |ui| {
-                                ui.set_min_height(row_height);
-                                ui.set_height(row_height);
-                                chat.sidebar_ui(ui, &store);
-                            });
-                    },
-                );
-
-                persist_and_hydrate_selected_room(&store, &rooms, &mut chat, active_room_id);
-
-                ui.allocate_ui_with_layout(
-                    egui::vec2(right_rect_width, row_height),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.set_min_height(row_height);
-                        ui.set_height(row_height);
-                        render_chat_columns(app, ui, &store, &mut chat, human_to_agent_mode);
-                    },
-                );
-            });
+            let tree = ui_state
+                .overview_tiles
+                .get_or_insert_with(build_overview_tiles_tree);
+            let mut behavior = OverviewPanesBehavior {
+                app,
+                store: &store,
+                chat: &mut chat,
+                human_to_agent_mode,
+            };
+            tree.ui(&mut behavior, ui);
         });
 }
 
@@ -1459,7 +1540,7 @@ fn render_chat_rectangle(
                         }
 
                         if awaiting_final_answer() {
-                            submit_final_answer(chat, store, &message_text);
+                            submit_final_answer(app, chat, store, &message_text);
                         } else {
                         record_human_transcript(&message_text);
 

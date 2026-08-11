@@ -6,13 +6,15 @@ repo root points here — this file is the canonical reference.
 ## What this is
 
 Humai is a cross-platform (Windows + Linux + macOS) desktop application for running
-Human-AI Interaction / HCI experiments. It's a two-crate Cargo workspace: `humai-core`
-is a UI-free library (agent prompting, the Ollama client, experiment recording, the
-chat SQLite store, the master-password vault), and `apps/humai` is the `eframe`/`egui`
-desktop binary built on top of it. The app talks to a local or remote
-[Ollama](https://ollama.com) server for model inference, and records experiment
-trials to CSV plus a mirrored JSONL event ledger plus a local SQLite chat log. There
-is no server component and no build step beyond `cargo`.
+Human-AI Interaction / HCI experiments. It's a three-crate Cargo workspace:
+`humai-core` is a UI-free library (agent prompting, the Ollama client, experiment
+recording, the chat SQLite store, the master-password vault); `apps/humai` is the
+`eframe`/`egui` desktop binary built on top of it; `humai-web` is a small local
+read-only browser dashboard, spawned by `apps/humai` in-process, that serves plain
+HTML/JS/CSS plus a JSON API reading the same chat `Store`. The app talks to a local
+or remote [Ollama](https://ollama.com) server for model inference, and records
+experiment trials to CSV plus a mirrored JSONL event ledger plus a local SQLite chat
+log. There is no separate backend service and no build step beyond `cargo`.
 
 License is proprietary (see [README.md](README.md)); do not add third-party code or
 dependencies without checking the license is compatible.
@@ -24,7 +26,7 @@ limitations, and the roadmap — see [ARCHITECTURE.md](ARCHITECTURE.md).
 ## Repository layout
 
 ```
-Cargo.toml                       # workspace root, members = ["apps/humai", "crates/humai-core"]
+Cargo.toml                       # workspace root, members = ["apps/humai", "crates/humai-core", "crates/humai-web"]
 crates/humai-core/                 # library crate — zero egui/eframe dependency
   Cargo.toml
   src/
@@ -43,22 +45,34 @@ crates/humai-core/                 # library crate — zero egui/eframe dependen
                                        #   wired into experiment_csv, not standalone), timing, metrics
     store.rs / store_schema.rs               # SQLite chat store (rusqlite, "chat.sqlite")
     sync_ext.rs                                # MutexExt/RwLockExt poison-recovering lock
-                                       #   accessors — used by both crates, see Locking below
+                                       #   accessors — used by all three crates, see Locking below
     timer.rs                                    # trial countdown timer used by the experiment UI
     vault.rs                                     # master-password gate (Argon2id) + encrypted
                                        #   Vault blob — no egui/UI dependency (rendering lives in
                                        #   apps/humai/src/ui/vault_panel.rs; keep it that way)
-apps/humai/                      # the UI binary — depends on humai-core as a path dependency
+crates/humai-web/                  # library crate — local read-only browser dashboard
+  Cargo.toml                        # depends on humai-core only, not apps/humai
+  web/                                # plain HTML/JS/CSS, no build step — embedded via include_str!
+                                     #   (routes.rs), not served from a filesystem path at runtime
+  src/
+    lib.rs                              # `pub async fn serve(WebServerConfig)`, spawned by
+                                       #   apps/humai onto its existing Tokio runtime
+    status.rs                            # WebStatusSnapshot + the Arc<Mutex<..>> apps/humai writes into
+    routes.rs                             # GET /, /api/status, /api/messages (reads humai_core::store::Store)
+apps/humai/                      # the UI binary — depends on humai-core and humai-web as path dependencies
   Cargo.toml                        # package manifest (version is the release version, e.g. 0.1.3)
   .cargo/config.toml                 # target-dir = "target" so `cargo` works from this dir without -p
   build.rs                            # Windows-only: generates the .ico and embeds it as a resource
   src/
     main.rs                              # entry point: Tokio runtime + eframe::run_native
     lib.rs                                # module tree / re-exports (pub use ... as the crate's public API)
-    app_model.rs                            # `Humai` struct: top-level in-memory app state
+    app_model.rs                            # `Humai` struct: top-level in-memory app state, incl.
+                                       #   web_status/web_dashboard_addr and spawn_web_dashboard()
     app_state.rs                             # `AppState`: shared, lockable runtime config (metrics)
     window_icon.rs                            # platform-split: Win32 SendMessage icons vs egui IconData
     ui/                                        # egui panels: settings, design, overview chat, vault unlock UI
+      mod.rs                                    # HumaiUiState also holds the persisted egui_tiles::Tree
+                                       #   for the Overview tab's resizable sidebar/chat split
       overview_chat/                             # experiment engine UI + chat rendering (largest module,
                                        #   panel.rs is ~2k lines) — see "Known state-management debt" below
       vault_panel.rs                              # renders MasterVault; the only file that may import egui
@@ -90,22 +104,36 @@ parity the same way `distribute_app.sh`/`.bat` are kept in parity — Linux and 
 both wrap `distribute_app.sh` (it's plain POSIX bash, no Linux-specific bits) and
 Windows wraps `distribute_app.bat`, each with a versioned `HUMAI_DIST_DIR`, then
 archive and upload the result. Both scripts build from `apps/humai/`; Cargo resolves
-the `humai-core` path dependency as part of that build automatically, so the
-two-crate workspace split needed no changes to either script.
+the `humai-core`/`humai-web` path dependencies as part of that build automatically,
+so the workspace split needed no changes to either script. `humai-web`'s static
+assets are embedded into the binary at compile time (not copied as files), so
+nothing needs staging into `dist/` for the dashboard to work in a distributed build.
 
-## `humai-core` vs `apps/humai`: where new code goes
+## `humai-core` / `apps/humai` / `humai-web`: where new code goes
 
 - **If it doesn't need `egui`/`eframe`, it belongs in `humai-core`.** Business logic
   (prompt construction, trial sequencing, recording, the chat store, the vault) lives
-  there so it can be unit tested directly and so a future CLI/HTTP API can depend on
-  it without pulling in a GUI toolkit. `crates/humai-core/src/experiment/mod.rs` is
-  the reference example: pure functions taking their inputs as parameters, no
+  there so it can be unit tested directly and so `humai-web` (and a future CLI) can
+  depend on it without pulling in a GUI toolkit. `crates/humai-core/src/experiment/mod.rs`
+  is the reference example: pure functions taking their inputs as parameters, no
   `OnceLock`/global state, straightforward to test.
 - **If it renders (`egui::Ui`, `egui::Context`, ...), it belongs in `apps/humai`.**
   `apps/humai/src/ui/overview_chat/chat.rs`'s `ChatExample` is the reference example
   of the seam: the pure data types it operates on (`ChatMessage`, `Room`, ...) live in
   `humai_core::chat_types`, but `ChatExample` itself and its `sidebar_ui` rendering
   method stay in the UI crate.
+- **If it's an HTTP route or anything the browser dashboard serves, it belongs in
+  `humai-web`.** `humai-web` depends only on `humai-core`, never on `apps/humai` —
+  don't add a dependency in that direction, it would invert the whole point of the
+  split (a UI-free engine that a server can depend on). New read endpoints go in
+  `crates/humai-web/src/routes.rs` and should read from `humai-core` state (the
+  `Store`, or a snapshot type like `WebStatusSnapshot`) rather than trying to reach
+  into `apps/humai`'s private UI-module statics — see "Known state-management debt"
+  below for why that's not accessible today anyway. `apps/humai/src/app_model.rs`'s
+  `spawn_web_dashboard`/`update_web_status` (called from `ui/overview_chat/panel.rs`
+  at the trial-lifecycle points) is the pattern for feeding new status fields
+  through: add to `WebStatusSnapshot`, populate it in `update_web_status`, done — no
+  changes needed on the `humai-web` side for a field that's just carried through.
 - **Known state-management debt** (documented in ARCHITECTURE.md's "Known
   Limitations", not something to extend): `apps/humai/src/ui/overview_chat/panel.rs`
   and `chat.rs` still hold experiment/chat UI state (current trial, chat rooms,
@@ -347,6 +375,32 @@ first launch — this is expected, not a bug).
   extending the idempotent-column-add pattern past what it's good for.
 - `vault/.master_hash` is also restricted to `0600` on Unix (`vault.rs::restrict_to_owner`)
   — it's an Argon2id password hash, readable-by-anyone-on-the-box was the previous state.
+
+## Local web dashboard
+
+- `crates/humai-web` is spawned automatically by `Humai::new()`
+  (`apps/humai/src/app_model.rs::spawn_web_dashboard`) onto the Tokio runtime
+  `main.rs` already keeps alive — there is no separate server process to start or
+  stop, and no way to run it without also running the desktop app (by design; see
+  `crates/humai-web/src/lib.rs`'s doc comment if you want to change that).
+- `HUMAI_WEB_BIND` (default `127.0.0.1:8787`) sets the bind address; must be a
+  `host:port` socket address (`SocketAddr`), not a hostname. `HUMAI_WEB_DISABLED=1`
+  turns the server off entirely. Both are read once, at `Humai::new()` — changing
+  them requires a restart, same as `HUMAI_AIR_GAP`/`HUMAI_METRICS_DIR`.
+- **The default bind is loopback-only and that default matters.** Experiment
+  transcripts are potentially sensitive human-subjects data; don't change the
+  default to `0.0.0.0` or otherwise widen exposure without it being an explicit,
+  deliberate ask — this mirrors the same caution `HUMAI_AIR_GAP` already applies to
+  outbound Ollama traffic, just for the inbound direction.
+- The dashboard is **read-only** — `crates/humai-web/src/routes.rs` has no route
+  that mutates anything. Keep it that way unless de-globalizing `panel.rs`'s
+  experiment state (see "Known state-management debt" above) has actually happened
+  first; a write endpoint today would have nothing safe to write to.
+- `crates/humai-web/web/*.html`/`.js`/`.css` are embedded into the binary via
+  `include_str!` in `routes.rs`, not served from a filesystem path — editing them
+  requires a rebuild to take effect (no live-reload), and nothing needs to be staged
+  into `dist/` by `distribute_app.sh`/`.bat` for the dashboard to work in a
+  distributed build.
 
 ## Release process
 
