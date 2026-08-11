@@ -4,6 +4,7 @@ description = "Local read-only browser dashboard for a running Humai instance: s
 version = "0.1.3"
 edition = "2024"
 rust-version = "1.85"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 humai-core = { path = "../humai-core" }

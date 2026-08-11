@@ -16,8 +16,9 @@ or remote [Ollama](https://ollama.com) server for model inference, and records
 experiment trials to CSV plus a mirrored JSONL event ledger plus a local SQLite chat
 log. There is no separate backend service and no build step beyond `cargo`.
 
-License is proprietary (see [README.md](README.md)); do not add third-party code or
-dependencies without checking the license is compatible.
+Licensed under GPL-3.0-or-later (see [LICENSE](LICENSE)); do not add a dependency
+whose license is incompatible with the GPL (e.g. code under a "no derivatives" or
+similarly restrictive license) without checking first.
 
 For a narrative walkthrough of how these modules fit together — process model, the
 experiment engine's trial/condition logic, storage formats, security model, known
