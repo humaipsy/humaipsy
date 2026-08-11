@@ -20,6 +20,15 @@ The engine (agent prompting, the Ollama client, experiment recording, the chat s
 - Git (>= 2.30)
 - Rust toolchain (stable with Edition 2024 support; rustc >= 1.85)
 - Cargo (bundled with Rust toolchain)
+- **Linux**: build-essential (or equivalent), pkg-config, and the X11/Wayland/audio
+  dev headers eframe's windowing backend links against: `libxkbcommon-dev`,
+  `libwayland-dev`, `wayland-protocols`, `libx11-dev`, `libxrandr-dev`, `libxi-dev`,
+  `libxcursor-dev`, `libasound2-dev`, `libegl1-mesa-dev`, `libgl1-mesa-dev` (Debian/Ubuntu
+  package names — see `.github/workflows/ci.yml` for the exact `apt-get install` list)
+- **Windows**: Microsoft C++ Build Tools (the MSVC linker `link.exe`), via the
+  [Visual Studio Build Tools installer](https://visualstudio.microsoft.com/visual-cpp-build-tools/) —
+  required by the default `x86_64-pc-windows-msvc` Rust target
+- **macOS**: Xcode Command Line Tools (`xcode-select --install`) for the system linker/toolchain
 
 ## Components
 
@@ -61,6 +70,71 @@ cargo clippy --all-targets -- -D warnings
 
 </details>
 
+
+<details>
+<summary>Windows</summary>
+<br>
+
+```sh
+# Rust Application Development
+run_app.bat
+
+# Manually
+cd ./apps/humai
+
+# Fast compile check (all bins and tests)
+cargo check --all-targets
+
+# Run app (UI only)
+cargo run
+
+# Run the helper binary to create/update vault/.master_hash (run from apps/humai/)
+cargo run --bin gen_master_hash
+
+# Build release binary
+cargo build --release
+
+# Run tests (add --workspace from the repo root to also cover the humai-core crate)
+cargo test
+
+# Lint — CI-equivalent gate, must pass clean
+cargo clippy --all-targets -- -D warnings
+```
+
+</details>
+
+
+<details>
+<summary>MacOS</summary>
+<br>
+
+```sh
+# Rust Application Development
+./run_app.sh
+
+# Manually
+cd ./apps/humai
+
+# Fast compile check (all bins and tests)
+cargo check --all-targets
+
+# Run app (UI only)
+cargo run
+
+# Run the helper binary to create/update vault/.master_hash (run from apps/humai/)
+cargo run --bin gen_master_hash
+
+# Build release binary
+cargo build --release
+
+# Run tests (add --workspace from the repo root to also cover the humai-core crate)
+cargo test
+
+# Lint — CI-equivalent gate, must pass clean
+cargo clippy --all-targets -- -D warnings
+```
+
+</details>
 
 
 ## License
