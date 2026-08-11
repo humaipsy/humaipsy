@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: ["main"]
   pull_request:
 
 jobs:
@@ -48,14 +46,15 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
+      # --workspace is required: apps/humai and crates/humai-core are two
+      # separate workspace members, and a plain `cargo test` run from either
+      # member's own directory only tests that one package — it silently
+      # skips the other member's tests/lints, it doesn't error.
       - name: cargo check
-        working-directory: apps/humai
-        run: cargo check --all-targets
+        run: cargo check --workspace --all-targets
 
       - name: cargo test
-        working-directory: apps/humai
-        run: cargo test --all-targets
+        run: cargo test --workspace --all-targets
 
       - name: cargo clippy
-        working-directory: apps/humai
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings

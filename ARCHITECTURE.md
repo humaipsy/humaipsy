@@ -297,7 +297,8 @@ Rough priority order, highest-value first:
   icon toolchain) on top of a `humai-core = { path = "../../crates/humai-core" }`
   dependency.
 - CI (`.github/workflows/ci.yml`) runs `cargo check` / `cargo test` / `cargo clippy
-  -D warnings` on Linux, Windows, and macOS for every push to `main` and every PR.
+  -D warnings --workspace` on Linux, Windows, and macOS for every PR (not on push to
+  `main` — merges land via squash-merged PRs that already ran these checks).
 - Tag-triggered release workflows (`release-linux.yml`, `release-windows.yml`,
   `release-macos.yml`) build `--release` and upload
   `humai-<version>-{ubu,win,mac}.{tar.gz,zip}` to the tag's GitHub Release;

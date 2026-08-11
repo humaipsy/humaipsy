@@ -72,7 +72,7 @@ apps/humai/                      # the UI binary — depends on humai-core as a 
   metrics/                            # gitignored except structure — CSV/ledger exports + chat.sqlite land here
 distribute_app.sh / .bat            # build release + stage a standalone dist/ folder (see below)
 run_app.sh / .bat                   # `cargo clean && cargo run` — quick dev loop
-.github/workflows/ci.yml               # runs on every push to main + every PR: check/test/clippy on Linux + Windows + macOS
+.github/workflows/ci.yml               # runs on every PR: check/test/clippy --workspace on Linux + Windows + macOS
 .github/workflows/release-linux.yml   # tag-triggered Linux release build + GitHub Release upload
 .github/workflows/release-windows.yml # tag-triggered Windows release build + GitHub Release upload
 .github/workflows/release-macos.yml   # tag-triggered macOS (arm64) release build + GitHub Release upload
@@ -229,9 +229,15 @@ Tokio tasks (`rt.spawn`) for Ollama requests, and Tokio isolates a panicking tas
 unwind + `catch_unwind` so the rest of the app keeps running; `panic = "abort"` would
 turn any single bad task panic into a full process crash.
 
-`.github/workflows/ci.yml` runs `cargo check`/`test`/`clippy -D warnings` on Linux,
-Windows, and macOS for every push to `main` and every PR — this is the gate that
-catches breakage before a release tag is ever cut. Keep it green.
+`.github/workflows/ci.yml` runs `cargo check`/`test`/`clippy -D warnings --workspace`
+on Linux, Windows, and macOS for every PR — this is the gate that catches breakage
+before a merge, and therefore before a release tag is ever cut. Keep it green. It
+does not also run on every push to `main`: merges land through squash-merged PRs
+that already ran these checks against the same tree, so re-running on `main` would
+just be duplicate work, not extra coverage. `--workspace` is load-bearing here — a
+plain `cargo check`/`test`/`clippy` invoked from inside a single member's directory
+(`apps/humai/` or `crates/humai-core/`) only covers that one package and silently
+skips the other member's tests and lints.
 
 ### Distributing a standalone build
 
