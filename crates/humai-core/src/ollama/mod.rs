@@ -9,6 +9,13 @@ use crate::recording::timing::{duration_us, InferenceTraceContext};
 mod client;
 mod engine;
 
+/// Model used when a caller has no model configured yet (e.g. first launch,
+/// before Settings has a selection). Callers should normally pass an explicit
+/// model — this is a last-resort fallback, not a channel for propagating the
+/// user's selection (that's `Humai::selected_ollama_model`, passed explicitly
+/// into every inference call).
+pub const DEFAULT_OLLAMA_MODEL: &str = "glm-4.7-flash:latest";
+
 static HTTP_POLICY: OnceLock<RwLock<HttpPolicy>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug)]

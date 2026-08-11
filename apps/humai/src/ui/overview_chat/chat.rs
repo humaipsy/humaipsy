@@ -43,7 +43,7 @@ impl ChatExample {
         self.rooms = rooms;
     }
 
-    pub fn add_room(&mut self, name: String, store: &mut humai_core::store::Store) {
+    pub fn add_room(&mut self, name: String, store: &humai_core::store::Store) {
         if let Ok(id) = store.create_conversation() {
             let _ = store.rename_conversation(&id, &name);
             self.rooms.push(Room::new(id.clone(), name));
@@ -51,12 +51,11 @@ impl ChatExample {
         }
     }
 
-    pub fn sidebar_ui(&mut self, ui: &mut Ui) {
-        let mut store = match humai_core::store::Store::open("metrics/chat.sqlite") {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-
+    /// Renders the Overview sidebar (timer, participant ID, room management).
+    /// `store` is the already-open chat database handle owned by the caller —
+    /// this used to open its own second connection on every frame; now it
+    /// reuses the one the caller already has.
+    pub fn sidebar_ui(&mut self, ui: &mut Ui, store: &humai_core::store::Store) {
         let rooms_section_height = ui.available_height();
         let rooms_list_height = 200.0;
 
@@ -109,7 +108,7 @@ impl ChatExample {
 
                         if ui.button("New Room").clicked() {
                             let name = format!("Room {}", self.rooms.len() + 1);
-                            self.add_room(name, &mut store);
+                            self.add_room(name, store);
                         }
 
                         if ui
@@ -184,8 +183,7 @@ impl ChatExample {
             },
         );
 
-        self.render_rename_room_modal(ui.ctx(), &mut store);
-
+        self.render_rename_room_modal(ui.ctx(), store);
     }
 
     fn section_separator(ui: &mut Ui) {
@@ -243,7 +241,7 @@ impl ChatExample {
         }
     }
 
-    fn render_rename_room_modal(&mut self, ctx: &egui::Context, store: &mut humai_core::store::Store) {
+    fn render_rename_room_modal(&mut self, ctx: &egui::Context, store: &humai_core::store::Store) {
         let mut is_open = RENAME_ROOM_MODAL_OPEN
             .get_or_init(|| Mutex::new(false))
             .lock()

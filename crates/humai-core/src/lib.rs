@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod chat_types;
+pub mod experiment;
 #[path = "recording/metrics.rs"]
 pub mod metrics;
 pub mod ollama;

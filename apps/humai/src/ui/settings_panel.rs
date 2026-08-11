@@ -54,10 +54,6 @@ impl Humai {
                 if ui.button("Set").clicked() {
                     let selected = ui_state.ollama.model_selection_draft.trim().to_string();
                     self.selected_ollama_model = selected.clone();
-                    // Update process env so downstream code reading OLLAMA_MODEL sees the same global model.
-                    unsafe {
-                        std::env::set_var("OLLAMA_MODEL", selected.clone());
-                    }
                     if selected.is_empty() {
                         ui_state.ollama.model_set_status =
                             "Global model cleared (using fallback).".to_string();
