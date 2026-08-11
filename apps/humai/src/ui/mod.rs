@@ -36,6 +36,10 @@ impl Default for OllamaUiState {
 #[derive(Default)]
 pub(crate) struct HumaiUiState {
 	pub(crate) ollama: OllamaUiState,
+	/// Resizable sidebar/chat layout for the Overview tab. `None` until first
+	/// rendered, then built once and persisted here (it holds the user's
+	/// drag-to-resize position) — see `overview_chat::panel::build_overview_tiles_tree`.
+	pub(crate) overview_tiles: Option<egui_tiles::Tree<overview_chat::panel::OverviewPane>>,
 }
 
 /// Bundled so emoji in Ollama responses render identically on Windows and Linux,
@@ -143,6 +147,14 @@ impl eframe::App for HumaiApp {
 			&mut self.last_applied_theme,
 			&mut self.phosphor_fonts_installed,
 		);
+
+		// The web dashboard (humai-web) mirrors this flag on every request and
+		// withholds content while locked — the vault itself lives here on
+		// HumaiApp, not on Humai, so this per-frame sync is what lets the
+		// dashboard find out the lock state changed at all.
+		self.humai
+			.vault_unlocked
+			.store(self.vault.is_unlocked(), std::sync::atomic::Ordering::Relaxed);
 
 		if !self.vault.is_unlocked() {
 			egui::CentralPanel::default().show(ctx, |ui| {

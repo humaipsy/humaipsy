@@ -188,6 +188,39 @@ impl Humai {
             ui.separator();
             ui.add_space(6.0);
 
+            ui.label(egui::RichText::new("Web Dashboard").strong().size(16.0));
+            ui.separator();
+            match self.web_dashboard_addr {
+                Some(addr) => {
+                    let url = format!("http://{addr}");
+                    ui.horizontal(|ui| {
+                        ui.label("Live read-only view:");
+                        ui.hyperlink(&url);
+                    });
+                    ui.label(
+                        egui::RichText::new(
+                            "Shows the current chat transcript and experiment status. \
+                             Read-only — nothing on this page can control the app. \
+                             Bound to this machine only by default (HUMAI_WEB_BIND to change, \
+                             HUMAI_WEB_DISABLED=1 to turn it off).",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                }
+                None => {
+                    ui.label(
+                        egui::RichText::new("Disabled (HUMAI_WEB_DISABLED is set).")
+                            .small()
+                            .weak(),
+                    );
+                }
+            }
+
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(6.0);
+
             ui.label(egui::RichText::new("Theme").strong().size(16.0));
             ui.separator();
             ui.horizontal(|ui| {

@@ -3,26 +3,31 @@
 This document describes how Humai is put together: process model, module boundaries,
 data flow, storage formats, and the main runtime subsystems. For contributor-facing
 rules (cross-platform gotchas, build commands, things to leave alone), see
-[AGENTS.md](AGENTS.md). For the one-paragraph pitch, see [README.md](README.md).
+[AGENTS.md](AGENTS.md). For the one-paragraph pitch, see [README.md](README.md). For
+what's actually protected — and what isn't — about experiment data, see
+[PRIVACY.md](PRIVACY.md).
 
 ## Summary
 
 Humai is a desktop application for running structured Human-AI Interaction (HCI)
-experiments, built as two Cargo workspace members: **`humai-core`**, a UI-free
+experiments, built as three Cargo workspace members: **`humai-core`**, a UI-free
 library crate holding the engine (agent prompting, the Ollama client, experiment
-recording, the chat SQLite store, the master-password vault), and **`apps/humai`**,
-the `eframe`/`egui` desktop binary that renders the UI on top of it. A researcher
-configures an experiment design (participant ID, topic, per-trial time limit), runs
-participants through a timed chat trial sequence against a locally- or
-remotely-hosted LLM served by [Ollama](https://ollama.com), and the app records every
-trial as a row in a CSV file, a mirrored JSONL event ledger, and the full chat
-transcript in a local SQLite database. There is no backend service, no telemetry, and
-no required network dependency beyond the Ollama host the operator configures.
+recording, the chat SQLite store, the master-password vault); **`apps/humai`**, the
+`eframe`/`egui` desktop binary that renders the UI on top of it; and
+**`humai-web`**, a small local read-only browser dashboard served from within the
+desktop app's own process. A researcher configures an experiment design (participant
+ID, topic, per-trial time limit), runs participants through a timed chat trial
+sequence against a locally- or remotely-hosted LLM served by
+[Ollama](https://ollama.com), and the app records every trial as a row in a CSV file,
+a mirrored JSONL event ledger, and the full chat transcript in a local SQLite
+database. There is no separate backend service and no telemetry; the only inbound
+network exposure is the optional dashboard, bound to loopback by default (see
+[Local web dashboard](#local-web-dashboard) below), and the only outbound one is the
+Ollama host the operator configures.
 
 The `humai-core`/`apps/humai` split exists specifically so the engine can be
 exercised without booting a GUI window — unit tests import `humai-core` directly, and
-it's what a future CLI batch-runner or HTTP API would depend on too (see
-[Roadmap](#roadmap--next-steps)).
+it's what `humai-web` (and a future CLI batch-runner) depend on too.
 
 ## Process model
 
@@ -30,7 +35,8 @@ it's what a future CLI batch-runner or HTTP API would depend on too (see
 main() [apps/humai/src/main.rs]
   ├─ spawns a dedicated OS thread running a Tokio multi-thread runtime
   │    (kept alive for the process lifetime; used for all humai_core::ollama HTTP
-  │     calls and model-list refreshes, via rt_handle.spawn(...))
+  │     calls, model-list refreshes, and the humai-web dashboard server, all via
+  │     rt_handle.spawn(...) — one runtime, no second process)
   └─ eframe::run_native(...) on the calling thread
        └─ HumaiApp::update() — called once per UI frame
             ├─ vault gate (humai_core::vault::MasterVault) — blocks all UI until unlocked
@@ -86,27 +92,48 @@ crates/humai-core/          Library crate — zero egui/eframe dependency
     vault.rs                                 Master-password gate (Argon2id) +
                               encrypted Vault blob (ChaCha20-Poly1305)
 
-apps/humai/                  UI binary — depends on humai-core as a path dependency
+crates/humai-web/            Library crate — local read-only browser dashboard.
+  Cargo.toml                  Depends on humai-core only (not apps/humai) — same
+                              one-directional dependency shape as humai-core itself,
+                              so it could run standalone later even though today
+                              it's always spawned embedded in apps/humai.
+  web/                          Plain HTML/JS/CSS, no build step, no framework —
+                              embedded into the binary at compile time (include_str!),
+                              not served from a filesystem path (see routes.rs)
+  src/
+    lib.rs                       pub async fn serve(WebServerConfig) — binds a
+                              TcpListener and runs axum::serve until the process exits
+    status.rs                     WebStatusSnapshot (serde Serialize) + the
+                              Arc<Mutex<..>> alias apps/humai writes into
+    routes.rs                      GET / (+ /app.js, /style.css, embedded), GET
+                              /api/status, GET /api/messages (reads humai_core::store::Store
+                              directly — no new Store methods needed)
+
+apps/humai/                  UI binary — depends on humai-core and humai-web as path dependencies
   src/
     main.rs                    Process entry point: Tokio runtime bootstrap, eframe::run_native
     lib.rs                      Module tree / re-exports (pub use ... as the crate's public API)
     app_model.rs                  Humai: top-level in-memory app state (selected model,
-                              prompts, active tab, theme, HTTP policy flags, metrics config)
+                              prompts, active tab, theme, HTTP policy flags, metrics config,
+                              web_status/web_dashboard_addr — see Local web dashboard below)
     app_state.rs                    AppState: Arc<RwLock<..>>-guarded runtime config shared
                               across UI and background tasks (currently just MetricsConfig)
     window_icon.rs                    Platform-split viewport/taskbar icon setup (Win32 vs egui)
     ui/                                  egui rendering, one module per panel
       mod.rs                              HumaiApp (the eframe::App impl), theme + font
-                              bootstrap, vault-gated top-level frame dispatch
+                              bootstrap, vault-gated top-level frame dispatch;
+                              HumaiUiState also holds the persisted egui_tiles::Tree
+                              for the Overview tab's resizable layout
       panel_render.rs                       Top-level tab bar (Overview / Design / Settings)
       settings_panel.rs                       Ollama host/model selection, connection test,
-                              CSV recording toggle/output dir, Catppuccin theme picker
+                              CSV recording toggle/output dir, dashboard URL, theme picker
       vault_panel.rs                            Renders MasterVault state; the only file
                               allowed to import both egui and humai_core::vault together
       overview_chat/                              Experiment engine UI + chat rendering
         panel.rs                                    Trial sequencing orchestration (delegates
                               its math to humai_core::experiment), condition/timeout handling,
-                              CSV export shortcut, chat room UI, participant-ID modal.
+                              CSV export shortcut, chat room UI, participant-ID modal, the
+                              egui_tiles OverviewPane/Behavior for the sidebar/chat split.
                               State is still held in process-global OnceLock<Mutex<T>>
                               statics here — see Known Limitations.
         chat.rs                                       ChatExample: in-memory chat/room
@@ -229,12 +256,51 @@ fonts (egui's rasterizer only supports single-color glyphs, so emoji render tint
 monochrome, not full-color — a renderer limitation, not a bug).
 
 Three top-level tabs (`app_model::MainPanelTab`):
-- **Overview** — the live chat/experiment room, sidebar (timer, participant ID, room
-  management), and the message thread itself.
+- **Overview** — the live chat/experiment room. The sidebar (timer, participant ID,
+  room management) and the message thread are two `egui_tiles` panes with a
+  user-draggable divider (`OverviewPane`/`OverviewPanesBehavior` in `panel.rs`),
+  not a fixed-width split.
 - **Design** — experiment design fields (name, participant ID, topic, condition
   count, trials-per-condition, trial duration) that feed `ExperimentDesignSnapshot`.
 - **Settings** — Ollama host/model configuration and connectivity test, CSV recording
-  toggle and output directory, theme picker.
+  toggle and output directory, the web dashboard URL, theme picker.
+
+## Local web dashboard
+
+`crates/humai-web` is a small `axum` server, spawned by `Humai::new()` onto the same
+Tokio runtime `main.rs` already keeps alive — not a second process, not a WASM build
+of the egui UI. It serves a plain HTML/JS/CSS page (`crates/humai-web/web/`, embedded
+into the binary at compile time) that polls two JSON endpoints every ~1.5s:
+
+- `GET /api/status` — a `WebStatusSnapshot` (design name, participant ID, condition,
+  trial progress, running state, timer) that `apps/humai`'s `panel.rs` updates at the
+  same points it already mutates its trial-session state
+  (`update_web_status`, called from `start_experiment_from_play`,
+  `advance_to_next_trial`, `finalize_experiment`)
+- `GET /api/messages` — the most-recently-updated conversation's messages, read
+  straight from the same SQLite `Store` the desktop app writes to
+  (`Store::list_conversations`/`load_messages`, unchanged). No new state, no push —
+  WAL mode means this concurrent read never blocks the app's writes.
+
+**It is read-only by design.** There is no endpoint that can start a trial, send a
+message, or otherwise mutate app state — see the Roadmap if that's ever wanted.
+Bound to `127.0.0.1:8787` by default (`HUMAI_WEB_BIND` to change, `HUMAI_WEB_DISABLED=1`
+to turn it off entirely) — experiment transcripts are potentially sensitive
+human-subjects data, so inbound exposure gets the same opt-in caution the outbound
+`HUMAI_AIR_GAP` policy already applies to Ollama traffic. A bind failure (e.g. the
+port is already in use) is logged to stderr; the desktop app starts regardless.
+
+**Gated by the master-password vault, not independently authenticated.** The
+dashboard has no login of its own — instead, `HumaiApp::update` (`ui/mod.rs`) mirrors
+`MasterVault::is_unlocked()` into a shared `humai_web::SharedVaultLock` flag every
+frame, and `get_status`/`get_messages` check it before touching any state, returning
+blanked/empty responses while locked. Locking the desktop app (the Settings "Lock"
+button) stops the dashboard from serving transcript content within one frame. This
+was a real gap during development — the dashboard initially had no relationship to
+the vault at all — caught and fixed before merge, not after. See
+[PRIVACY.md](PRIVACY.md) for the full security/privacy write-up, including what this
+gating does *not* protect against (the dashboard still has no auth of its own; the
+loopback-only bind is the actual barrier once the app is unlocked).
 
 ## Known limitations
 
@@ -263,29 +329,41 @@ knows what it's standing on:
   changed mid-run — but worth knowing.
 - **macOS release build is Apple Silicon (arm64) only** — see AGENTS.md's release-
   process section.
-- **No CLI or HTTP API yet.** The `humai-core`/`apps/humai` split makes both
-  structurally possible now (the engine has no UI dependency), but neither has been
-  built.
+- **The web dashboard's chat DB path is fixed at startup.** Like the desktop-side
+  `Store` cache above, `humai-web`'s `chat_db_path` is computed once in
+  `spawn_web_dashboard` from the metrics config at launch; changing the output
+  directory in Settings later doesn't move the dashboard's read target. Same low
+  practical impact, same root cause, not yet fixed for either.
+- **The dashboard is read-only and has no CLI counterpart yet.** `humai-web`/
+  `humai-core` make both structurally possible (see Roadmap), but an interactive
+  (write) dashboard and a headless CLI runner are both still just ideas, not code.
 
 ## Roadmap / next steps
 
 Rough priority order, highest-value first:
 
 1. De-globalize `panel.rs`/`chat.rs`'s remaining `OnceLock<Mutex<T>>` state (see
-   Known Limitations) — the single biggest remaining architectural debt.
+   Known Limitations) — the single biggest remaining architectural debt, and what
+   would let the web dashboard grow beyond read-only without reaching into private
+   UI-module statics.
 2. A headless experiment runner (`humai-core` + a small CLI) for scripted/CI-driven
    regression testing of prompts and trial logic without a GUI.
 3. Generalize `humai_core::experiment` beyond exactly two named conditions to an
    arbitrary researcher-authored set, with a matching Design-tab UI for entering each
    condition's prompt — turning "Conditions: N" from a clamped, honest control into a
    fully general one.
-4. An HTTP API crate built on `humai-core`, once there's a concrete consumer for it.
-5. An Intel (`x86_64-apple-darwin`) macOS release build, or a `lipo`-merged universal
+4. Push updates for the web dashboard (SSE/WebSocket) instead of polling, and/or
+   write endpoints (send a message, advance a trial) once #1 makes that state
+   reachable from outside `panel.rs` — currently blocked on that, not on `humai-web`
+   itself.
+5. A real hostname/TLS story for the dashboard (`https://humai.local` via mDNS, or a
+   self-signed localhost cert) if plain `http://localhost:8787` stops being enough.
+6. An Intel (`x86_64-apple-darwin`) macOS release build, or a `lipo`-merged universal
    binary, if Intel Mac users are a real audience.
 
 ## Build & release
 
-- Two-member Cargo workspace (`apps/humai`, `crates/humai-core`);
+- Three-member Cargo workspace (`apps/humai`, `crates/humai-core`, `crates/humai-web`);
   `[profile.release]` (LTO, `codegen-units = 1`, `strip = true`) lives in the
   workspace-root `Cargo.toml` because Cargo only reads profile settings from the root.
 - `apps/humai/build.rs` is Windows-only: generates a multi-resolution `.ico` from
@@ -293,9 +371,12 @@ Rough priority order, highest-value first:
 - `reqwest` uses `rustls-tls` and `rusqlite` uses the `bundled` SQLite — both
   deliberately chosen to avoid a system OpenSSL/pkg-config dependency on Windows dev
   machines. Both live in `humai-core`; `apps/humai` only adds UI-specific
-  dependencies (`eframe`, `egui`, `catppuccin-egui`, `egui-phosphor`, the Windows
-  icon toolchain) on top of a `humai-core = { path = "../../crates/humai-core" }`
-  dependency.
+  dependencies (`eframe`, `egui`, `catppuccin-egui`, `egui-phosphor`, `egui_tiles`,
+  the Windows icon toolchain) on top of `humai-core`/`humai-web` path dependencies.
+  `humai-web` itself adds `axum` — chosen over alternatives (Rocket, actix-web)
+  specifically because `hyper`/`tower` are already resolved transitively via
+  `reqwest`, so it shares the existing async HTTP stack instead of introducing a
+  second one.
 - CI (`.github/workflows/ci.yml`) runs `cargo check` / `cargo test` / `cargo clippy
   -D warnings --workspace` on Linux, Windows, and macOS for every PR (not on push to
   `main` — merges land via squash-merged PRs that already ran these checks).

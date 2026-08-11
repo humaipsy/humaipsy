@@ -65,7 +65,7 @@ impl Humai {
 
                     match self.active_tab {
                         MainPanelTab::Overview => {
-                            crate::ui::overview_chat::render_overview_panel(self, ui);
+                            crate::ui::overview_chat::render_overview_panel(self, ui, ui_state);
                         }
                         MainPanelTab::Design => {
                             crate::ui::overview_chat::render_design_panel(self, ui);
