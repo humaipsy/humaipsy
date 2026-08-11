@@ -1,6 +1,6 @@
 use crate::app_model::Humai;
-use crate::sync_ext::MutexExt;
-use crate::vault::MasterVault;
+use humai_core::sync_ext::MutexExt;
+use humai_core::vault::MasterVault;
 use eframe::egui;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -105,7 +105,7 @@ fn refresh_ollama_models_on_startup(
 		let handle = humai.rt_handle.clone();
 		let ollama_host = humai.ollama_host.clone();
 		handle.spawn(async move {
-			let models = crate::ollama::fetch_ollama_models(&ollama_host)
+			let models = humai_core::ollama::fetch_ollama_models(&ollama_host)
 				.await
 				.unwrap_or_default();
 			*models_arc.lock_recover() = models;

@@ -1,5 +1,5 @@
 [workspace]
-members = ["apps/humai"]
+members = ["apps/humai", "crates/humai-core"]
 default-members = ["apps/humai"]
 resolver = "3"
 

@@ -1,11 +1,11 @@
-//! Rendering for the master-password gate. Kept separate from [`crate::vault`] so the
-//! crypto/state module has no dependency on the UI framework — see [`crate::vault::MasterVault`]
+//! Rendering for the master-password gate. Kept separate from [`humai_core::vault`] so the
+//! crypto/state module has no dependency on the UI framework — see [`humai_core::vault::MasterVault`]
 //! for the logic this renders.
 
 use eframe::egui::{self, TextEdit};
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::vault::MasterVault;
+use humai_core::vault::MasterVault;
 
 fn sync_password_field(ui: &mut egui::Ui, value: &mut SecretString, hint: &str) -> egui::Response {
 	let mut plain: String = value.expose_secret().to_owned();

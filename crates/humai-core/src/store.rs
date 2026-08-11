@@ -8,9 +8,8 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection};
 
-use crate::recording::audit;
-use super::chat::{AssistantGeneration, ChatMessage, MessageCorrelation};
-use super::incoming::MessageSource;
+use crate::chat_types::{AssistantGeneration, ChatMessage, MessageCorrelation, MessageSource};
+use crate::recording::timing::{new_id, now_rfc3339};
 
 pub use schema::USER_VERSION;
 
@@ -100,8 +99,8 @@ impl Store {
     }
 
     pub fn create_conversation(&self) -> Result<String, StoreError> {
-        let id = audit::new_id();
-        let now = audit::now_rfc3339();
+        let id = new_id();
+        let now = now_rfc3339();
         let conn = self.conn();
         conn.execute(
             r#"INSERT INTO conversations (id, name, created_at, updated_at)
@@ -137,7 +136,7 @@ impl Store {
         let conn = self.conn();
         conn.execute(
             "UPDATE conversations SET name = ?2, updated_at = ?3 WHERE id = ?1",
-            params![id, new_name, audit::now_rfc3339()],
+            params![id, new_name, now_rfc3339()],
         )?;
         Ok(())
     }
@@ -178,7 +177,7 @@ impl Store {
             )?;
         }
 
-        let now = audit::now_rfc3339();
+        let now = now_rfc3339();
         tx.execute(
             "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
             params![&now, conversation_id],
@@ -274,7 +273,7 @@ fn restrict_to_owner(_path: &Path) -> io::Result<()> {
 
 fn touch_conversation_conn(conn: &Connection, id: &str) -> Result<(), StoreError> {
     // Touch parent conversation so list sorting reflects message-level updates/deletions.
-    let now = audit::now_rfc3339();
+    let now = now_rfc3339();
     conn.execute(
         "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
         params![&now, id],

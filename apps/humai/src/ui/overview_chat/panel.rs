@@ -10,22 +10,23 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use eframe::egui;
 use egui_phosphor::regular;
 
-use crate::agent::timing_to_inference_snapshot;
+use humai_core::agent::timing_to_inference_snapshot;
 use crate::app_model::{GlobalChatMode, Humai};
-use crate::metrics::{
+use humai_core::metrics::{
     display_csv_path, ExperimentDesignSnapshot, MetricsConfig, SessionMetadata,
     TrialMetadata,
 };
-use crate::recording::experiment_csv::{
+use humai_core::recording::experiment_csv::{
     self, begin_session, begin_trial, end_experiment, end_trial, record_ai_transcript,
     record_experiment_configured, record_final_answer, record_human_transcript,
 };
-use crate::recording::timing::InferenceTraceContext;
-use crate::sync_ext::MutexExt;
+use humai_core::recording::timing::InferenceTraceContext;
+use humai_core::sync_ext::MutexExt;
 
-use super::chat::{ChatExample, ChatMessage, Room};
-use super::incoming::MessageSource;
-use super::store::Store;
+use humai_core::chat_types::{ChatMessage, MessageSource, Room};
+use humai_core::store::Store;
+
+use super::chat::ChatExample;
 
 static CHAT: OnceLock<Mutex<ChatExample>> = OnceLock::new();
 static ACTIVE_ROOM_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
@@ -245,7 +246,7 @@ fn assistant_prompt_for_current_condition(app: &Humai) -> String {
 }
 
 fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, timed_out: bool) {
-    let was_running = crate::timer::main_timer_is_running();
+    let was_running = humai_core::timer::main_timer_is_running();
     let mut session = match EXPERIMENT_SESSION
         .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
         .lock()
@@ -283,7 +284,7 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
         session.running = false;
         session.trial_timeout_popup_open = false;
         drop(session);
-        crate::timer::pause_main_timer();
+        humai_core::timer::pause_main_timer();
         set_experiment_running(false);
 
         let final_question = HUMAI_EXPDESIGN
@@ -353,8 +354,8 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
     );
 
     if was_running {
-        crate::timer::stop_and_reset_main_timer();
-        crate::timer::start_main_timer();
+        humai_core::timer::stop_and_reset_main_timer();
+        humai_core::timer::start_main_timer();
     }
 
     let design = HUMAI_EXPDESIGN
@@ -388,7 +389,7 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
 }
 
 fn handle_trial_timeout(app: &Humai, store: &Store, chat: &mut ChatExample) {
-    if !crate::timer::main_timer_is_running() {
+    if !humai_core::timer::main_timer_is_running() {
         return;
     }
 
@@ -398,7 +399,7 @@ fn handle_trial_timeout(app: &Humai, store: &Store, chat: &mut ChatExample) {
         .map(|design| design.trial_seconds.max(1) as u64)
         .unwrap_or(120);
 
-    if crate::timer::main_timer_elapsed_seconds() < trial_seconds {
+    if humai_core::timer::main_timer_elapsed_seconds() < trial_seconds {
         return;
     }
 
@@ -586,7 +587,7 @@ fn render_experiment_finished_popup(ctx: &egui::Context) {
     }
 
     // Safety net: ensure timer is not running while experiment is finished.
-    crate::timer::pause_main_timer();
+    humai_core::timer::pause_main_timer();
 
     let mut close_clicked = false;
     let mut download_clicked = false;
@@ -708,14 +709,14 @@ fn current_trial_memory_start_index() -> usize {
 fn agent_memory_from_chat(
     chat: &ChatExample,
     start_index: usize,
-) -> Vec<crate::agent::AgentMemoryMessage> {
+) -> Vec<humai_core::agent::AgentMemoryMessage> {
     chat.messages
         .iter()
         .skip(start_index.min(chat.messages.len()))
         .filter_map(|msg| {
             let role = match msg.source {
-                MessageSource::Human => crate::agent::AgentRole::User,
-                MessageSource::Api => crate::agent::AgentRole::Assistant,
+                MessageSource::Human => humai_core::agent::AgentRole::User,
+                MessageSource::Api => humai_core::agent::AgentRole::Assistant,
                 _ => return None,
             };
 
@@ -724,7 +725,7 @@ fn agent_memory_from_chat(
                 return None;
             }
 
-            Some(crate::agent::AgentMemoryMessage {
+            Some(humai_core::agent::AgentMemoryMessage {
                 role,
                 content: content.to_string(),
             })
@@ -754,7 +755,7 @@ fn spawn_ollama_opening_question(
     }
 
     app.rt_handle.spawn(async move {
-        let agent = crate::agent::HumaiAgent::new(ollama_host, model, assistant_prompt)
+        let agent = humai_core::agent::HumaiAgent::new(ollama_host, model, assistant_prompt)
             .with_history_size(history_size);
 
         let out = agent
@@ -787,7 +788,7 @@ fn spawn_ollama_opening_question(
         };
 
         if let Some(room_id) = selected_room
-            && let Ok(store) = super::store::Store::open(store_path)
+            && let Ok(store) = humai_core::store::Store::open(store_path)
         {
             let ts = ChatExample::display_time_for_message(&reply);
             let _ = store.append_message(&room_id, &reply, &ts);
@@ -868,7 +869,7 @@ fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample
         return;
     }
 
-    crate::timer::start_main_timer();
+    humai_core::timer::start_main_timer();
 
     let topic = design.topic.trim().to_string();
     let participant_id = design.participant_id.trim().to_string();
@@ -1075,7 +1076,7 @@ pub(crate) fn render_overview_panel(app: &mut Humai, ui: &mut egui::Ui) {
         chat.selected_room = rooms.first().map(|room| room.id.clone());
     }
 
-    if graph_running || crate::timer::main_timer_is_running() {
+    if graph_running || humai_core::timer::main_timer_is_running() {
         ui.ctx().request_repaint_after(Duration::from_millis(33));
     }
 
@@ -1289,7 +1290,7 @@ fn render_chat_rectangle(
                                             .on_hover_text("Stop timer and reset to 00:00:00")
                                             .clicked()
                                         {
-                                            crate::timer::stop_and_reset_main_timer();
+                                            humai_core::timer::stop_and_reset_main_timer();
                                             end_trial(false);
                                             end_experiment();
                                             set_experiment_running(false);
@@ -1314,13 +1315,13 @@ fn render_chat_rectangle(
                                         if ui
                                             .add_enabled(
                                                 trial_navigation_enabled
-                                                    && crate::timer::main_timer_is_running(),
+                                                    && humai_core::timer::main_timer_is_running(),
                                                 pause_btn,
                                             )
                                             .on_hover_text("Pause timer")
                                             .clicked()
                                         {
-                                            crate::timer::pause_main_timer();
+                                            humai_core::timer::pause_main_timer();
                                         }
 
                                         let play_btn = egui::Button::new(
@@ -1331,7 +1332,7 @@ fn render_chat_rectangle(
                                         if ui
                                             .add_enabled(
                                                 !awaiting_final_answer()
-                                                    && !crate::timer::main_timer_is_running(),
+                                                    && !humai_core::timer::main_timer_is_running(),
                                                 play_btn,
                                             )
                                             .on_hover_text("Start timer")
@@ -1527,7 +1528,7 @@ fn render_chat_rectangle(
                                 *flag = true;
                             }
                             app.rt_handle.spawn(async move {
-                                let agent = crate::agent::HumaiAgent::new(
+                                let agent = humai_core::agent::HumaiAgent::new(
                                     ollama_host,
                                     model,
                                     assistant_prompt,
@@ -1564,7 +1565,7 @@ fn render_chat_rectangle(
                                     },
                                 };
                                 if let Some(room_id) = selected_room
-                                    && let Ok(store) = super::store::Store::open(store_path)
+                                    && let Ok(store) = humai_core::store::Store::open(store_path)
                                 {
                                     let ts = ChatExample::display_time_for_message(&reply);
                                     let _ = store.append_message(&room_id, &reply, &ts);

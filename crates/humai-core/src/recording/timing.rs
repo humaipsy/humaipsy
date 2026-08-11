@@ -2,6 +2,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use uuid::Uuid;
+
+/// Generates a new lowercase-hex UUIDv4 with no hyphens, used as a stable
+/// identifier for conversations, ledger events, and other recorded entities.
+pub fn new_id() -> String {
+    Uuid::new_v4().simple().to_string()
+}
 
 pub const EVENT_TYPE_INFERENCE_TIMING: &str = "inference_timing";
 pub const EVENT_TYPE_TURN_TIMING: &str = "turn_timing";

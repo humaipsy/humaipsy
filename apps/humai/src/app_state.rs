@@ -1,5 +1,5 @@
-use crate::metrics::MetricsConfig;
-use crate::sync_ext::RwLockExt;
+use humai_core::metrics::MetricsConfig;
+use humai_core::sync_ext::RwLockExt;
 use std::sync::RwLock;
 
 struct AppStateInner {
@@ -12,7 +12,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(metrics_config: MetricsConfig) -> Self {
-        crate::recording::experiment_csv::update_config(metrics_config.clone());
+        humai_core::recording::experiment_csv::update_config(metrics_config.clone());
         Self {
             inner: RwLock::new(AppStateInner { metrics_config }),
         }
@@ -23,7 +23,7 @@ impl AppState {
     }
 
     pub fn update_metrics_config(&self, metrics_config: MetricsConfig) {
-        crate::recording::experiment_csv::update_config(metrics_config.clone());
+        humai_core::recording::experiment_csv::update_config(metrics_config.clone());
         let mut guard = self.inner.write_recover();
         guard.metrics_config = metrics_config;
     }

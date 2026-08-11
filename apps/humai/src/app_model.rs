@@ -1,8 +1,8 @@
 #![allow(dead_code, unused_imports)]
 
 use crate::app_state::AppState;
-use crate::metrics::MetricsConfig;
-use crate::ollama::HttpPolicy;
+use humai_core::metrics::MetricsConfig;
+use humai_core::ollama::HttpPolicy;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::runtime::Handle;
@@ -52,8 +52,8 @@ pub struct Humai {
 
 impl Humai {
     pub fn new(rt_handle: Handle) -> Self {
-        let http_policy = crate::ollama::HttpPolicy::from_env();
-        crate::ollama::set_http_policy(http_policy);
+        let http_policy = humai_core::ollama::HttpPolicy::from_env();
+        humai_core::ollama::set_http_policy(http_policy);
         let metrics_config = MetricsConfig::from_env();
         let app_state = Arc::new(AppState::new(metrics_config.clone()));
         let coop_agent_prompt = std::env::var("HUMAI_COOP_AGENT_PROMPT").unwrap_or_else(|_| {
@@ -86,7 +86,7 @@ impl Humai {
     }
 
     pub(crate) fn sync_http_policy(&self) {
-        crate::ollama::set_http_policy(HttpPolicy {
+        humai_core::ollama::set_http_policy(HttpPolicy {
             air_gap_enabled: self.air_gap_enabled,
             allow_local_ollama: self.allow_local_ollama,
         });

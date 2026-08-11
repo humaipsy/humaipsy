@@ -358,7 +358,7 @@ impl MasterVault {
         self.skip_vault || !self.stored_hash.is_empty()
     }
 
-    pub(crate) fn try_unlock(&mut self) {
+    pub fn try_unlock(&mut self) {
         self.status.clear();
         if self.skip_vault {
             self.unlocked = true;
@@ -426,7 +426,7 @@ impl MasterVault {
         }
     }
 
-    pub(crate) fn try_setup_password(&mut self) {
+    pub fn try_setup_password(&mut self) {
         self.status.clear();
 
         let password = self.master_input.expose_secret();
@@ -470,24 +470,24 @@ impl MasterVault {
     }
 
     /// Whether the vault gate is disabled (debug-mode default; see module docs).
-    pub(crate) fn is_skip_vault(&self) -> bool {
+    pub fn is_skip_vault(&self) -> bool {
         self.skip_vault
     }
 
     /// Whether no master password has been configured yet, i.e. first-run setup is needed.
-    pub(crate) fn needs_password_setup(&self) -> bool {
+    pub fn needs_password_setup(&self) -> bool {
         self.stored_hash.is_empty()
     }
 
-    pub(crate) fn status(&self) -> &str {
+    pub fn status(&self) -> &str {
         &self.status
     }
 
-    pub(crate) fn master_input_mut(&mut self) -> &mut SecretString {
+    pub fn master_input_mut(&mut self) -> &mut SecretString {
         &mut self.master_input
     }
 
-    pub(crate) fn confirm_input_mut(&mut self) -> &mut SecretString {
+    pub fn confirm_input_mut(&mut self) -> &mut SecretString {
         &mut self.confirm_input
     }
 }

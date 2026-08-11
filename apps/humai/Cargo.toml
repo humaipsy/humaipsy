@@ -9,27 +9,17 @@ build = "build.rs"
 
 [dependencies]
 
+humai-core = { path = "../../crates/humai-core" }
+
 eframe = "0.33"
 egui = "0.33"
 catppuccin-egui = { version = "5.7.0", default-features = false, features = ["egui33"] }
 egui-phosphor = "0.11.0"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 anyhow = "1.0"
-futures-util = "0.3"
-reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"] }
-serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-chrono = "0.4"
-time = { version = "0.3", features = ["formatting", "parsing"] }
-uuid = { version = "1", features = ["v4"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
-rand = "0.9"
-sha2 = "0.10"
-argon2 = "0.5"
 secrecy = "0.10"
-rpassword = "7"
-hkdf = "0.12"
-chacha20poly1305 = "0.10"
+time = { version = "0.3", features = ["formatting", "parsing"] }
 
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "0.6"
@@ -43,5 +33,3 @@ ico = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 winres = "0.1"
 
-[dev-dependencies]
-tempfile = "3"

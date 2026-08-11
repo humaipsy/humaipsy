@@ -1,79 +1,23 @@
 // UI state and rendering for the overview chat panel.
 // This type owns local chat state and forwards committed messages to persistence/hooks.
-#[derive(Debug, Clone)]
-pub struct Room {
-    pub id: String,
-    pub name: String,
-}
-
-impl Room {
-    pub fn new(id: String, name: String) -> Self {
-        Room { id, name }
-    }
-}
+// The pure data types (ChatMessage, Room, MessageSource, ...) live in
+// humai_core::chat_types so they're shared with the SQLite Store without pulling
+// egui into the engine crate.
 
 use std::sync::{Arc, Mutex, OnceLock};
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use egui::Ui;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use super::incoming::MessageSource;
+use humai_core::chat_types::{ChatMessage, Room, UiInbox};
+
+pub use humai_core::chat_types::MessageSource;
 
 static RENAME_ROOM_MODAL_OPEN: OnceLock<Mutex<bool>> = OnceLock::new();
 static RENAME_ROOM_INPUT: OnceLock<Mutex<String>> = OnceLock::new();
 static RENAME_ROOM_TARGET_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-
-pub struct UiInbox<T> {
-    tx: Sender<T>,
-    rx: Receiver<T>,
-}
-
-impl<T> UiInbox<T> {
-    pub fn new() -> Self {
-        let (tx, rx) = mpsc::channel();
-        Self { tx, rx }
-    }
-
-    pub fn sender(&self) -> Sender<T> {
-        self.tx.clone()
-    }
-
-    pub fn drain(&self) -> Vec<T> {
-        // Non-blocking drain keeps egui's frame loop responsive.
-        let mut out = Vec::new();
-        while let Ok(item) = self.rx.try_recv() {
-            out.push(item);
-        }
-        out
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MessageCorrelation {
-    pub conversation_id: String,
-    pub event_id: String,
-    pub request_id: String,
-    pub timestamp_rfc3339: String,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssistantGeneration {
-    pub model: String,
-    pub num_predict: Option<i32>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ChatMessage {
-    pub content: String,
-    pub from: Option<String>,
-    pub correlation: Option<MessageCorrelation>,
-    pub source: MessageSource,
-    pub api_auto_respond: bool,
-    pub assistant_generation: Option<AssistantGeneration>,
-}
 
 pub struct ChatExample {
     pub messages: Vec<ChatMessage>,
@@ -99,7 +43,7 @@ impl ChatExample {
         self.rooms = rooms;
     }
 
-    pub fn add_room(&mut self, name: String, store: &mut super::store::Store) {
+    pub fn add_room(&mut self, name: String, store: &mut humai_core::store::Store) {
         if let Ok(id) = store.create_conversation() {
             let _ = store.rename_conversation(&id, &name);
             self.rooms.push(Room::new(id.clone(), name));
@@ -108,7 +52,7 @@ impl ChatExample {
     }
 
     pub fn sidebar_ui(&mut self, ui: &mut Ui) {
-        let mut store = match super::store::Store::open("metrics/chat.sqlite") {
+        let mut store = match humai_core::store::Store::open("metrics/chat.sqlite") {
             Ok(s) => s,
             Err(_) => return,
         };
@@ -131,7 +75,7 @@ impl ChatExample {
 
                         ui.add_space(6.0);
 
-                        let timer_value = crate::timer::main_timer_display();
+                        let timer_value = humai_core::timer::main_timer_display();
                         Self::render_full_width_value_row(ui, &timer_value, value_row_width);
 
                         Self::section_separator(ui);
@@ -299,7 +243,7 @@ impl ChatExample {
         }
     }
 
-    fn render_rename_room_modal(&mut self, ctx: &egui::Context, store: &mut super::store::Store) {
+    fn render_rename_room_modal(&mut self, ctx: &egui::Context, store: &mut humai_core::store::Store) {
         let mut is_open = RENAME_ROOM_MODAL_OPEN
             .get_or_init(|| Mutex::new(false))
             .lock()

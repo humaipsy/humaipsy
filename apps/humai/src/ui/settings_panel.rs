@@ -1,5 +1,5 @@
 use crate::app_model::{CatppuccinTheme, Humai};
-use crate::sync_ext::MutexExt;
+use humai_core::sync_ext::MutexExt;
 use crate::ui::HumaiUiState;
 use eframe::egui;
 use std::sync::atomic::Ordering;
@@ -80,7 +80,7 @@ impl Humai {
                     let handle = self.rt_handle.clone();
                     let ollama_host = self.ollama_host.clone();
                     handle.spawn(async move {
-                        let models = crate::ollama::fetch_ollama_models(&ollama_host)
+                        let models = humai_core::ollama::fetch_ollama_models(&ollama_host)
                             .await
                             .unwrap_or_default();
                         *models_arc.lock_recover() = models;
@@ -108,7 +108,7 @@ impl Humai {
                     let test_status = ui_state.ollama.test_status.clone();
                     let test_running = ui_state.ollama.test_running.clone();
                     handle.spawn(async move {
-                        match crate::ollama::test_ollama(
+                        match humai_core::ollama::test_ollama(
                             ollama_host.as_str(),
                             if model.trim().is_empty() {
                                 None
