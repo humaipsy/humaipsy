@@ -84,7 +84,14 @@ fn is_loopback_host(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
-    host.parse::<IpAddr>()
+    // `Url::host_str()` returns IPv6 hosts in bracketed form (e.g. "[::1]",
+    // matching URL authority syntax), but `IpAddr`'s FromStr doesn't accept
+    // brackets — strip them before parsing, or a legitimate loopback IPv6
+    // Ollama host would be misidentified as non-loopback and blocked under
+    // air-gap mode.
+    let unbracketed = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
+    unbracketed
+        .parse::<IpAddr>()
         .map(|ip| ip.is_loopback())
         .unwrap_or(false)
 }
@@ -262,4 +269,75 @@ pub async fn test_ollama(ollama_host: &str, model_override: Option<&str>) -> Res
     )
     .await?;
     Ok(result.response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // guard_ollama_request reads/writes the single process-global HTTP_POLICY,
+    // so every scenario runs sequentially in one test (like RecorderState in
+    // recording::experiment_csv's tests) rather than as separate #[test] fns —
+    // Rust runs tests in parallel by default, and two tests each mutating the
+    // same global policy would race and produce flaky failures.
+    #[test]
+    fn guard_ollama_request_enforces_air_gap_policy() {
+        // Air-gap off (the default): any host is allowed, including remote ones.
+        set_http_policy(HttpPolicy {
+            air_gap_enabled: false,
+            allow_local_ollama: true,
+        });
+        assert!(guard_ollama_request("http://127.0.0.1:11434/api/chat").is_ok());
+        assert!(guard_ollama_request("http://example.com:11434/api/chat").is_ok());
+
+        // Air-gap on, local Ollama allowed: loopback hosts (IPv4, IPv6, and the
+        // "localhost" name) pass; anything else is blocked.
+        set_http_policy(HttpPolicy {
+            air_gap_enabled: true,
+            allow_local_ollama: true,
+        });
+        assert!(guard_ollama_request("http://127.0.0.1:11434/api/chat").is_ok());
+        assert!(guard_ollama_request("http://[::1]:11434/api/chat").is_ok());
+        assert!(guard_ollama_request("http://localhost:11434/api/chat").is_ok());
+        assert!(guard_ollama_request("http://example.com:11434/api/chat").is_err());
+        assert!(guard_ollama_request("http://192.168.1.50:11434/api/chat").is_err());
+
+        // Air-gap on, local Ollama also disabled: nothing is allowed, not even loopback.
+        set_http_policy(HttpPolicy {
+            air_gap_enabled: true,
+            allow_local_ollama: false,
+        });
+        assert!(guard_ollama_request("http://127.0.0.1:11434/api/chat").is_err());
+        assert!(guard_ollama_request("http://example.com:11434/api/chat").is_err());
+
+        // Reset to the default so this test doesn't leak state into whichever
+        // test the shared test binary happens to run next.
+        set_http_policy(HttpPolicy::default());
+    }
+
+    #[test]
+    fn is_loopback_host_recognizes_localhost_and_loopback_ips_only() {
+        assert!(is_loopback_host("localhost"));
+        assert!(is_loopback_host("LOCALHOST"));
+        assert!(is_loopback_host("127.0.0.1"));
+        assert!(is_loopback_host("::1"));
+        assert!(is_loopback_host("[::1]")); // bracketed form, as returned by Url::host_str()
+        assert!(!is_loopback_host("example.com"));
+        assert!(!is_loopback_host("192.168.1.1"));
+        assert!(!is_loopback_host(""));
+    }
+
+    #[test]
+    fn parse_url_like_accepts_bare_host_port_without_scheme() {
+        // Ollama hosts are often configured as "127.0.0.1:11434" with no
+        // scheme; guard_ollama_request must still resolve the host correctly.
+        let url = parse_url_like("127.0.0.1:11434").expect("bare host:port should parse");
+        assert_eq!(url.host_str(), Some("127.0.0.1"));
+    }
+
+    #[test]
+    fn parse_url_like_rejects_empty_input() {
+        assert!(parse_url_like("").is_err());
+        assert!(parse_url_like("   ").is_err());
+    }
 }

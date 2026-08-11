@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use axum::Router;
 use axum::extract::State;
@@ -9,16 +10,21 @@ use axum::routing::get;
 use humai_core::store::Store;
 use humai_core::sync_ext::MutexExt;
 
-use crate::status::SharedWebStatus;
+use crate::status::{SharedVaultLock, SharedWebStatus, WebStatusSnapshot};
 
 #[derive(Clone)]
 struct AppState {
     store: Arc<Store>,
     status: SharedWebStatus,
+    vault_unlocked: SharedVaultLock,
 }
 
-pub(crate) fn router(store: Arc<Store>, status: SharedWebStatus) -> Router {
-    let state = AppState { store, status };
+pub(crate) fn router(store: Arc<Store>, status: SharedWebStatus, vault_unlocked: SharedVaultLock) -> Router {
+    let state = AppState {
+        store,
+        status,
+        vault_unlocked,
+    };
     Router::new()
         .route("/", get(index))
         .route("/app.js", get(app_js))
@@ -50,8 +56,17 @@ async fn style_css() -> impl IntoResponse {
     )
 }
 
-async fn get_status(State(state): State<AppState>) -> Json<crate::status::WebStatusSnapshot> {
-    Json(state.status.lock_recover().clone())
+/// Withholds status content whenever the desktop app's vault is locked — the
+/// dashboard being open shouldn't be a way to see experiment data the vault
+/// screen is currently hiding. `vault_unlocked` in the response is real either
+/// way, so the page can show a clear "locked" state instead of just going blank.
+async fn get_status(State(state): State<AppState>) -> Json<WebStatusSnapshot> {
+    if !state.vault_unlocked.load(Ordering::Relaxed) {
+        return Json(WebStatusSnapshot::default());
+    }
+    let mut snapshot = state.status.lock_recover().clone();
+    snapshot.vault_unlocked = true;
+    Json(snapshot)
 }
 
 #[derive(serde::Serialize)]
@@ -62,7 +77,12 @@ struct MessageView {
     timestamp: String,
 }
 
+/// Same lock check as `get_status`, checked *before* the Store is ever
+/// touched — a locked vault means an empty response, not a filtered one.
 async fn get_messages(State(state): State<AppState>) -> Json<Vec<MessageView>> {
+    if !state.vault_unlocked.load(Ordering::Relaxed) {
+        return Json(Vec::new());
+    }
     Json(latest_room_messages(&state.store).unwrap_or_default())
 }
 

@@ -3,7 +3,9 @@
 This document describes how Humai is put together: process model, module boundaries,
 data flow, storage formats, and the main runtime subsystems. For contributor-facing
 rules (cross-platform gotchas, build commands, things to leave alone), see
-[AGENTS.md](AGENTS.md). For the one-paragraph pitch, see [README.md](README.md).
+[AGENTS.md](AGENTS.md). For the one-paragraph pitch, see [README.md](README.md). For
+what's actually protected — and what isn't — about experiment data, see
+[PRIVACY.md](PRIVACY.md).
 
 ## Summary
 
@@ -287,6 +289,18 @@ to turn it off entirely) — experiment transcripts are potentially sensitive
 human-subjects data, so inbound exposure gets the same opt-in caution the outbound
 `HUMAI_AIR_GAP` policy already applies to Ollama traffic. A bind failure (e.g. the
 port is already in use) is logged to stderr; the desktop app starts regardless.
+
+**Gated by the master-password vault, not independently authenticated.** The
+dashboard has no login of its own — instead, `HumaiApp::update` (`ui/mod.rs`) mirrors
+`MasterVault::is_unlocked()` into a shared `humai_web::SharedVaultLock` flag every
+frame, and `get_status`/`get_messages` check it before touching any state, returning
+blanked/empty responses while locked. Locking the desktop app (the Settings "Lock"
+button) stops the dashboard from serving transcript content within one frame. This
+was a real gap during development — the dashboard initially had no relationship to
+the vault at all — caught and fixed before merge, not after. See
+[PRIVACY.md](PRIVACY.md) for the full security/privacy write-up, including what this
+gating does *not* protect against (the dashboard still has no auth of its own; the
+loopback-only bind is the actual barrier once the app is unlocked).
 
 ## Known limitations
 

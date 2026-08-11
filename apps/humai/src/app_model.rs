@@ -63,6 +63,13 @@ pub struct Humai {
     /// failure there (e.g. the port is already in use) is logged to stderr,
     /// not surfaced in the UI.
     pub(crate) web_dashboard_addr: Option<SocketAddr>,
+    /// Mirrors `MasterVault::is_unlocked()` — synced every frame by
+    /// `HumaiApp::update` (see `ui/mod.rs`), since the vault itself lives on
+    /// `HumaiApp`, not `Humai`. The web dashboard checks this on every
+    /// request and withholds status/message content while locked; without
+    /// this, locking the app would not stop the dashboard from continuing to
+    /// serve the last-known transcript over the network.
+    pub(crate) vault_unlocked: humai_web::SharedVaultLock,
 }
 
 impl Humai {
@@ -79,13 +86,20 @@ impl Humai {
         });
 
         let web_status = humai_web::new_shared_status();
-        let web_dashboard_addr = spawn_web_dashboard(&rt_handle, &metrics_config, web_status.clone());
+        let vault_unlocked = humai_web::new_shared_vault_lock();
+        let web_dashboard_addr = spawn_web_dashboard(
+            &rt_handle,
+            &metrics_config,
+            web_status.clone(),
+            vault_unlocked.clone(),
+        );
 
         Self {
             rt_handle,
             app_state,
             web_status,
             web_dashboard_addr,
+            vault_unlocked,
             selected_ollama_model: std::env::var("OLLAMA_MODEL").unwrap_or_default(),
             assistant_prompt: std::env::var("HUMAI_ASSISTANT_PROMPT").unwrap_or_else(|_| {
                 "You are HumaiAgent, the experiment assistant for human-to-agent conversations. Be clear, neutral, and helpful. Keep responses concise and actionable when possible.".to_string()
@@ -131,6 +145,7 @@ fn spawn_web_dashboard(
     rt_handle: &Handle,
     metrics_config: &MetricsConfig,
     status: humai_web::SharedWebStatus,
+    vault_unlocked: humai_web::SharedVaultLock,
 ) -> Option<SocketAddr> {
     if parse_bool_env("HUMAI_WEB_DISABLED") {
         return None;
@@ -154,6 +169,7 @@ fn spawn_web_dashboard(
             bind_addr,
             chat_db_path,
             status,
+            vault_unlocked,
         };
         if let Err(e) = humai_web::serve(config).await {
             eprintln!("[humai-web] dashboard server failed to start on {bind_addr}: {e}");

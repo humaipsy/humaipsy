@@ -148,6 +148,14 @@ impl eframe::App for HumaiApp {
 			&mut self.phosphor_fonts_installed,
 		);
 
+		// The web dashboard (humai-web) mirrors this flag on every request and
+		// withholds content while locked — the vault itself lives here on
+		// HumaiApp, not on Humai, so this per-frame sync is what lets the
+		// dashboard find out the lock state changed at all.
+		self.humai
+			.vault_unlocked
+			.store(self.vault.is_unlocked(), std::sync::atomic::Ordering::Relaxed);
+
 		if !self.vault.is_unlocked() {
 			egui::CentralPanel::default().show(ctx, |ui| {
 				ui.vertical_centered(|ui| {

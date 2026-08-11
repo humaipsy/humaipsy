@@ -16,7 +16,9 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub use status::{SharedWebStatus, WebStatusSnapshot, new_shared_status};
+pub use status::{
+    SharedVaultLock, SharedWebStatus, WebStatusSnapshot, new_shared_status, new_shared_vault_lock,
+};
 
 /// Configuration for the local dashboard server.
 pub struct WebServerConfig {
@@ -28,6 +30,10 @@ pub struct WebServerConfig {
     pub chat_db_path: PathBuf,
     /// Shared status handle the desktop app updates and this server reads.
     pub status: SharedWebStatus,
+    /// Mirrors the desktop app's master-password vault lock state. Every
+    /// route that could reveal experiment content checks this before
+    /// touching `status`/the `Store` — see `routes::get_status`/`get_messages`.
+    pub vault_unlocked: SharedVaultLock,
 }
 
 /// Opens the chat Store at `config.chat_db_path` and serves the dashboard
@@ -36,7 +42,7 @@ pub struct WebServerConfig {
 /// Tokio runtime — it does not create its own.
 pub async fn serve(config: WebServerConfig) -> anyhow::Result<()> {
     let store = Arc::new(humai_core::store::Store::open(&config.chat_db_path)?);
-    let app = routes::router(store, config.status);
+    let app = routes::router(store, config.status, config.vault_unlocked);
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
     axum::serve(listener, app).await?;
     Ok(())

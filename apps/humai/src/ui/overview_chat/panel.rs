@@ -170,6 +170,9 @@ fn update_web_status(app: &Humai) {
         total_trials,
         running: state.running,
         timer_display: humai_core::timer::main_timer_display(),
+        // humai-web's get_status route overwrites this from the live vault
+        // lock flag on every request — this value is never actually read.
+        vault_unlocked: false,
     };
 
     *app.web_status.lock_recover() = snapshot;

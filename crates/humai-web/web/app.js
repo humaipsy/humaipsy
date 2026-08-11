@@ -7,9 +7,18 @@ const el = (id) => document.getElementById(id);
 const connectionState = el("connection-state");
 
 function setConnectionState(state) {
+  // "locked" is a real, distinct state from "connected"/"lost": the server
+  // is reachable and answering, it's just withholding content because the
+  // desktop app's master-password vault isn't unlocked right now.
   connectionState.className = "pill pill-" + state;
   connectionState.textContent =
-    state === "connected" ? "connected" : state === "lost" ? "connection lost" : "connecting…";
+    state === "connected"
+      ? "connected"
+      : state === "locked"
+        ? "app locked"
+        : state === "lost"
+          ? "connection lost"
+          : "connecting…";
 }
 
 function renderStatus(status) {
@@ -51,6 +60,17 @@ function renderMessages(messages) {
   container.scrollTop = container.scrollHeight;
 }
 
+function renderLocked() {
+  el("status-design").textContent = "—";
+  el("status-participant").textContent = "—";
+  el("status-condition").textContent = "—";
+  el("status-trial").textContent = "—";
+  el("status-timer").textContent = "—";
+  el("status-running").textContent = "—";
+  el("messages").innerHTML =
+    '<p class="empty-state">Humai is locked. Unlock the desktop app to view the transcript here.</p>';
+}
+
 async function pollOnce() {
   try {
     const [statusRes, messagesRes] = await Promise.all([
@@ -60,8 +80,17 @@ async function pollOnce() {
     if (!statusRes.ok || !messagesRes.ok) {
       throw new Error("bad response");
     }
-    renderStatus(await statusRes.json());
-    renderMessages(await messagesRes.json());
+    const status = await statusRes.json();
+    const messages = await messagesRes.json();
+
+    if (!status.vault_unlocked) {
+      renderLocked();
+      setConnectionState("locked");
+      return;
+    }
+
+    renderStatus(status);
+    renderMessages(messages);
     setConnectionState("connected");
   } catch (err) {
     setConnectionState("lost");

@@ -21,7 +21,12 @@ dependencies without checking the license is compatible.
 
 For a narrative walkthrough of how these modules fit together — process model, the
 experiment engine's trial/condition logic, storage formats, security model, known
-limitations, and the roadmap — see [ARCHITECTURE.md](ARCHITECTURE.md).
+limitations, and the roadmap — see [ARCHITECTURE.md](ARCHITECTURE.md). For what's
+actually protected (and what isn't) about experiment data — network boundaries, the
+vault, file permissions, what's plaintext at rest — see [PRIVACY.md](PRIVACY.md).
+Any change that touches the vault, air-gap policy, the web dashboard's gating, or
+file permissions should keep that document accurate; it's read by people deciding
+whether this tool is safe to use with real participant data.
 
 ## Repository layout
 
@@ -401,6 +406,14 @@ first launch — this is expected, not a bug).
   requires a rebuild to take effect (no live-reload), and nothing needs to be staged
   into `dist/` by `distribute_app.sh`/`.bat` for the dashboard to work in a
   distributed build.
+- **The dashboard is gated by the master-password vault, mirrored via a shared
+  flag.** `HumaiApp::update` (`ui/mod.rs`) syncs `humai_core::vault::MasterVault::is_unlocked()`
+  into `Humai::vault_unlocked` (`humai_web::SharedVaultLock`, an `Arc<AtomicBool>`)
+  every frame; `routes::get_status`/`get_messages` check it first and withhold
+  content when `false`. If you add a new route that reads any experiment data, check
+  this flag the same way — don't assume the loopback bind alone is enough, since
+  "locked" is a real state a user actively puts the app into and expects respected.
+  See [PRIVACY.md](PRIVACY.md) for the full reasoning.
 
 ## Release process
 
