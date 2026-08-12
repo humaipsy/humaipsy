@@ -117,12 +117,6 @@ over HTTP:
   automated password guessing against the unlock screen itself. This does not
   protect the underlying `.master_hash` file if it's copied off the machine and
   attacked offline; Argon2id's memory-hardness is what raises the cost of *that*.
-- A `Vault`/`MasterVault` container also exists with a general-purpose
-  ChaCha20-Poly1305 encrypted-blob mechanism (HKDF-derived key from the same Argon2id
-  password stretch). **This is currently unused beyond its own round-trip test** — no
-  experiment data is encrypted through it today. It's infrastructure for a feature
-  that hasn't been built (see [ARCHITECTURE.md](ARCHITECTURE.md)'s roadmap), not a
-  protection you can currently rely on.
 
 ## Data at rest: what is and isn't encrypted
 
@@ -186,8 +180,6 @@ configured output directory. Covered by tests
   sends transcripts to whatever `OLLAMA_HOST` is set to.
 - Debug builds skip the master-password lock unless explicitly told not to — don't
   distribute or use a debug build for anything you wouldn't want unlocked-by-default.
-- The `Vault`'s encrypted-blob mechanism exists but isn't wired to encrypt any actual
-  experiment data yet.
 - None of the above is enforced or checked by an external audit — this document
   describes the implementation as read from the source, not a certification.
 

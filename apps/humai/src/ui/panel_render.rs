@@ -68,14 +68,17 @@ impl Humai {
                             crate::ui::overview_chat::render_overview_panel(self, ui, ui_state);
                         }
                         MainPanelTab::Design => {
-                            crate::ui::overview_chat::render_design_panel(self, ui);
+                            crate::ui::overview_chat::render_design_panel(self, ui, ui_state);
                         }
                         MainPanelTab::Settings => {
                             let ctx = ui.ctx().clone();
                             self.render_settings_widgets(ui, &ctx, ui_state);
                         }
                     }
-                    crate::ui::overview_chat::render_experiment_modals(ui.ctx());
+                    crate::ui::overview_chat::render_experiment_modals(
+                        ui.ctx(),
+                        &mut ui_state.overview_chat,
+                    );
                 });
             },
         );

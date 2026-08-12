@@ -1,4 +1,4 @@
-//! Master-password gate (Argon2id) and a small encrypted [`Vault`] container.
+//! Master-password gate (Argon2id).
 //!
 //! On first launch, the app prompts for a master password and writes `vault/.master_hash`.
 //! Later launches verify against that file, or against `HUMAI_MASTER_HASH` if set.
@@ -8,13 +8,9 @@
 //! Set `HUMAI_ENABLE_PASSWORD_LOCK=1` to enforce locking in debug builds.
 //! Set `HUMAI_SKIP_VAULT=1` to bypass locking in debug builds.
 
-use argon2::password_hash::rand_core::{OsRng, RngCore};
+use argon2::password_hash::rand_core::OsRng;
 use argon2::{Algorithm, Argon2, Params, PasswordHash, PasswordVerifier, Version};
-use chacha20poly1305::aead::{Aead, KeyInit};
-use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use hkdf::Hkdf;
 use secrecy::{ExposeSecret, SecretString};
-use sha2::Sha256;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -23,9 +19,6 @@ const DEFAULT_HASH_FILE: &str = "vault/.master_hash";
 const ARGON2_M_KIB_DEFAULT: u32 = 64 * 1024;
 const ARGON2_T_DEFAULT: u32 = 3;
 const ARGON2_P_MAX: u32 = 4;
-const VAULT_BLOB_VERSION: u32 = 1;
-const VAULT_KDF_LABEL: &[u8] = b"arp-vault-key-v1";
-const VAULT_AAD: &[u8] = b"arp.vault.blob.v1";
 
 fn parse_u32_env(name: &str) -> Option<u32> {
     std::env::var(name)
@@ -177,116 +170,6 @@ impl VaultKdfParams {
     }
 }
 
-#[derive(Clone)]
-pub struct VaultCipherBlob {
-    pub version: u32,
-    pub kdf: String,
-    pub aead: String,
-    pub memory_cost_kib: u32,
-    pub time_cost: u32,
-    pub parallelism: u32,
-    pub salt: [u8; 16],
-    pub nonce: [u8; 12],
-    pub ciphertext: Vec<u8>,
-}
-
-fn derive_vault_key(
-    master_password: &SecretString,
-    params: VaultKdfParams,
-    salt: &[u8],
-) -> anyhow::Result<[u8; 32]> {
-    let mut ikm = [0u8; 32];
-    let kdf = argon2id(&params)?;
-    kdf.hash_password_into(master_password.expose_secret().as_bytes(), salt, &mut ikm)
-        .map_err(|e| anyhow::anyhow!("failed to derive vault key: {e}"))?;
-
-    let hk = Hkdf::<Sha256>::new(Some(VAULT_KDF_LABEL), &ikm);
-    let mut out = [0u8; 32];
-    hk.expand(b"vault_enc_key", &mut out)
-        .map_err(|_| anyhow::anyhow!("HKDF expand failed"))?;
-    Ok(out)
-}
-
-/// In-memory encrypted blob store.
-#[derive(Default)]
-pub struct Vault {
-    encrypted_blob: Option<VaultCipherBlob>,
-}
-
-impl Vault {
-    pub fn set_encrypted_blob(
-        &mut self,
-        master_password: &SecretString,
-        plaintext: &[u8],
-        params: VaultKdfParams,
-    ) -> anyhow::Result<()> {
-        let mut salt = [0u8; 16];
-        let mut nonce = [0u8; 12];
-        OsRng.fill_bytes(&mut salt);
-        OsRng.fill_bytes(&mut nonce);
-
-        let key_material = derive_vault_key(master_password, params, &salt)?;
-        let key = Key::from_slice(&key_material);
-        let cipher = ChaCha20Poly1305::new(key);
-        let nonce_ref = Nonce::from_slice(&nonce);
-        let ciphertext = cipher
-            .encrypt(
-                nonce_ref,
-                chacha20poly1305::aead::Payload {
-                    msg: plaintext,
-                    aad: VAULT_AAD,
-                },
-            )
-            .map_err(|_| anyhow::anyhow!("vault encryption failed"))?;
-
-        self.encrypted_blob = Some(VaultCipherBlob {
-            version: VAULT_BLOB_VERSION,
-            kdf: "argon2id+hkdf-sha256".to_string(),
-            aead: "chacha20poly1305".to_string(),
-            memory_cost_kib: params.memory_cost_kib,
-            time_cost: params.time_cost,
-            parallelism: params.parallelism,
-            salt,
-            nonce,
-            ciphertext,
-        });
-        Ok(())
-    }
-
-    pub fn decrypt_blob(&self, master_password: &SecretString) -> anyhow::Result<Vec<u8>> {
-        let blob = self
-            .encrypted_blob
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("vault blob is empty"))?;
-        if blob.version != VAULT_BLOB_VERSION {
-            anyhow::bail!(
-                "unsupported vault blob version '{}'; expected '{}'",
-                blob.version,
-                VAULT_BLOB_VERSION
-            );
-        }
-
-        let params = VaultKdfParams {
-            memory_cost_kib: blob.memory_cost_kib,
-            time_cost: blob.time_cost,
-            parallelism: blob.parallelism,
-        };
-        let key_material = derive_vault_key(master_password, params, &blob.salt)?;
-        let key = Key::from_slice(&key_material);
-        let cipher = ChaCha20Poly1305::new(key);
-        let nonce = Nonce::from_slice(&blob.nonce);
-        cipher
-            .decrypt(
-                nonce,
-                chacha20poly1305::aead::Payload {
-                    msg: blob.ciphertext.as_ref(),
-                    aad: VAULT_AAD,
-                },
-            )
-            .map_err(|_| anyhow::anyhow!("vault decryption failed"))
-    }
-}
-
 /// Loads when the app starts; verifies a stored PHC Argon2id hash.
 pub struct MasterVault {
     /// PHC-format Argon2 hash string, or empty if misconfigured.
@@ -300,8 +183,6 @@ pub struct MasterVault {
     skip_vault: bool,
     failed_attempts: u32,
     next_attempt_at: Option<Instant>,
-    /// Future hook: populate after successful unlock.
-    pub vault: Vault,
 }
 
 impl Default for MasterVault {
@@ -346,7 +227,6 @@ impl MasterVault {
             skip_vault,
             failed_attempts: 0,
             next_attempt_at: None,
-            vault: Vault::default(),
         }
     }
 
@@ -538,19 +418,5 @@ mod tests {
             "master hash file should be owner-only read/write, got {:o}",
             mode & 0o777
         );
-    }
-
-    #[test]
-    fn vault_blob_roundtrip() {
-        let mut vault = Vault::default();
-        let secret = SecretString::new("test-password".to_string().into_boxed_str());
-        let plaintext = b"secret payload";
-        let params = VaultKdfParams::default();
-
-        vault
-            .set_encrypted_blob(&secret, plaintext, params)
-            .expect("encrypt blob");
-        let out = vault.decrypt_blob(&secret).expect("decrypt blob");
-        assert_eq!(out, plaintext);
     }
 }

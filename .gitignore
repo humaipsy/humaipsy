@@ -6,40 +6,19 @@ dist/
 # accumulate their own (can happen if cargo is invoked outside the workspace).
 apps/humai/Cargo.lock
 
-
-
-# Python platform artifacts
-platform/.venv/
-platform/.pytest_cache/
-platform/.mypy_cache/
-platform/__pycache__/
-
-# Built binaries staging (keep marker)
-binaries/*
-!binaries/.gitkeep
-
-
-
 .master_hash
-agents-workspace.json
 
 # Experiment CSV exports (per design file, e.g. metrics/Exp001.csv)
 apps/humai/metrics/*.csv
 timings.csv
 
-
 overview_chat_audit.jsonl
 chat.sqlite
+chat.sqlite-shm
+chat.sqlite-wal
 metrics/overview_chat_audit.jsonl
 metrics/chat.sqlite
 
-
 exp_*/
-
-docs/book/
-
-__pycache__/
-
-.master_hash
 
 *.csv

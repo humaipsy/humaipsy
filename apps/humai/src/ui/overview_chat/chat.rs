@@ -4,7 +4,7 @@
 // humai_core::chat_types so they're shared with the SQLite Store without pulling
 // egui into the engine crate.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use egui::Ui;
@@ -15,9 +15,12 @@ use humai_core::chat_types::{ChatMessage, Room, UiInbox};
 
 pub use humai_core::chat_types::MessageSource;
 
-static RENAME_ROOM_MODAL_OPEN: OnceLock<Mutex<bool>> = OnceLock::new();
-static RENAME_ROOM_INPUT: OnceLock<Mutex<String>> = OnceLock::new();
-static RENAME_ROOM_TARGET_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+#[derive(Clone, Debug, Default)]
+struct RenameRoomModalState {
+    open: bool,
+    input: String,
+    target_id: Option<String>,
+}
 
 pub struct ChatExample {
     pub messages: Vec<ChatMessage>,
@@ -30,6 +33,8 @@ pub struct ChatExample {
     pub rooms: Vec<Room>,
     pub selected_room: Option<String>,
     pub room_mode_human_agent: bool,
+
+    rename_room: RenameRoomModalState,
 }
 
 impl Default for ChatExample {
@@ -54,12 +59,12 @@ impl ChatExample {
     /// Renders the Overview sidebar (timer, participant ID, room management).
     /// `store` is the already-open chat database handle owned by the caller —
     /// this used to open its own second connection on every frame; now it
-    /// reuses the one the caller already has.
-    pub fn sidebar_ui(&mut self, ui: &mut Ui, store: &humai_core::store::Store) {
+    /// reuses the one the caller already has. `participant_id` is the current
+    /// experiment design's participant ID, owned by the caller's
+    /// `OverviewChatUiState` (this module doesn't depend on that type).
+    pub fn sidebar_ui(&mut self, ui: &mut Ui, store: &humai_core::store::Store, participant_id: &str) {
         let rooms_section_height = ui.available_height();
         let rooms_list_height = 200.0;
-
-        
 
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), rooms_section_height),
@@ -83,22 +88,9 @@ impl ChatExample {
 
                         ui.add_space(6.0);
 
-
-                        let participant_id = super::panel::HUMAI_EXPDESIGN
-                            .get_or_init(|| {
-                                std::sync::Mutex::new(super::panel::HumaiExpDesign::default())
-                            })
-                            .lock()
-                            .map(|design| {
-                                let trimmed = design.participant_id.trim();
-                                if trimmed.is_empty() {
-                                    "NONE".to_string()
-                                } else {
-                                    trimmed.to_string()
-                                }
-                            })
-                            .unwrap_or_else(|_| "NONE".to_string());
-                        Self::render_full_width_value_row(ui, &participant_id, value_row_width);
+                        let trimmed = participant_id.trim();
+                        let participant_id_display = if trimmed.is_empty() { "NONE" } else { trimmed };
+                        Self::render_full_width_value_row(ui, participant_id_display, value_row_width);
 
                         Self::section_separator(ui);
 
@@ -222,36 +214,17 @@ impl ChatExample {
             .map(|room| room.name.clone())
             .unwrap_or_default();
 
-        if let Ok(mut input) = RENAME_ROOM_INPUT
-            .get_or_init(|| Mutex::new(String::new()))
-            .lock()
-        {
-            *input = initial_name;
-        }
-
-        if let Ok(mut target) = RENAME_ROOM_TARGET_ID
-            .get_or_init(|| Mutex::new(None))
-            .lock()
-        {
-            *target = Some(target_id);
-        }
-
-        if let Ok(mut open) = RENAME_ROOM_MODAL_OPEN.get_or_init(|| Mutex::new(false)).lock() {
-            *open = true;
-        }
+        self.rename_room.input = initial_name;
+        self.rename_room.target_id = Some(target_id);
+        self.rename_room.open = true;
     }
 
     fn render_rename_room_modal(&mut self, ctx: &egui::Context, store: &humai_core::store::Store) {
-        let mut is_open = RENAME_ROOM_MODAL_OPEN
-            .get_or_init(|| Mutex::new(false))
-            .lock()
-            .map(|value| *value)
-            .unwrap_or(false);
-
-        if !is_open {
+        if !self.rename_room.open {
             return;
         }
 
+        let mut is_open = true;
         let mut close_modal = false;
         egui::Window::new("Rename Room")
             .collapsible(false)
@@ -264,39 +237,27 @@ impl ChatExample {
                 ui.label("New room name");
                 ui.add_space(8.0);
 
-                if let Ok(mut input) = RENAME_ROOM_INPUT
-                    .get_or_init(|| Mutex::new(String::new()))
-                    .lock()
-                {
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut *input)
-                            .hint_text("Type room name")
-                            .desired_width(360.0),
-                    );
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.rename_room.input)
+                        .hint_text("Type room name")
+                        .desired_width(360.0),
+                );
 
-                    ui.add_space(10.0);
-                    let ok_clicked = ui.button("OK").clicked()
-                        || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                ui.add_space(10.0);
+                let ok_clicked = ui.button("OK").clicked()
+                    || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
 
-                    if ok_clicked {
-                        let new_name = input.trim().to_string();
-                        if !new_name.is_empty() {
-                            let target_id = RENAME_ROOM_TARGET_ID
-                                .get_or_init(|| Mutex::new(None))
-                                .lock()
-                                .ok()
-                                .and_then(|value| value.clone());
-
-                            if let Some(room_id) = target_id {
-                                if let Some(room) = self.rooms.iter_mut().find(|room| room.id == room_id)
-                                {
-                                    room.name = new_name.clone();
-                                }
-                                let _ = store.rename_conversation(&room_id, &new_name);
-                            }
+                if ok_clicked {
+                    let new_name = self.rename_room.input.trim().to_string();
+                    if !new_name.is_empty()
+                        && let Some(room_id) = self.rename_room.target_id.clone()
+                    {
+                        if let Some(room) = self.rooms.iter_mut().find(|room| room.id == room_id) {
+                            room.name = new_name.clone();
                         }
-                        close_modal = true;
+                        let _ = store.rename_conversation(&room_id, &new_name);
                     }
+                    close_modal = true;
                 }
             });
 
@@ -304,9 +265,7 @@ impl ChatExample {
             is_open = false;
         }
 
-        if let Ok(mut open) = RENAME_ROOM_MODAL_OPEN.get_or_init(|| Mutex::new(false)).lock() {
-            *open = is_open;
-        }
+        self.rename_room.open = is_open;
     }
 
     pub fn current_timestamp_string() -> String {
@@ -357,6 +316,7 @@ impl ChatExample {
             rooms: Vec::new(),
             selected_room: None,
             room_mode_human_agent: true,
+            rename_room: RenameRoomModalState::default(),
         }
     }
 

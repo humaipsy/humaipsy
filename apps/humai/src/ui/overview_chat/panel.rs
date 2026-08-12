@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -28,20 +28,14 @@ use humai_core::store::Store;
 
 use super::chat::ChatExample;
 
-static CHAT: OnceLock<Mutex<ChatExample>> = OnceLock::new();
-static ACTIVE_ROOM_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-static ROOM_ORDER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
-pub(crate) static HUMAI_EXPDESIGN: OnceLock<Mutex<HumaiExpDesign>> = OnceLock::new();
-static EXPERIMENT_SESSION: OnceLock<Mutex<ExperimentSessionState>> = OnceLock::new();
-static EXP_RUN_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-static GLOBAL_INPUT_MODAL: OnceLock<Mutex<InputModalState>> = OnceLock::new();
-
 /// Chat SQLite connections, keyed by path and opened at most once per path —
 /// mirrors `InferenceEngine::from_host`'s cache in `humai_core::ollama::engine`.
 /// `render_overview_panel` used to call `Store::open` fresh on every UI frame
 /// (a new connection, `PRAGMA` setup, and schema check every ~16ms while the
-/// Overview tab is visible); this cache is what fixes that.
+/// Overview tab is visible); this cache is what fixes that. This is a genuine
+/// cross-cutting cache keyed by path (not process-started-once global state),
+/// so unlike the rest of this file's former statics it correctly stays a
+/// `OnceLock` — see AGENTS.md's "Known state-management debt" section.
 static STORE_CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<Store>>>> = OnceLock::new();
 
 fn shared_store(db_path: &Path) -> Result<Arc<Store>, humai_core::store::StoreError> {
@@ -66,13 +60,34 @@ fn chat_db_path(app: &Humai) -> PathBuf {
 // humai_core::experiment (parameterized, unit-tested there). This file keeps
 // thin wrappers with the same names/signatures the rest of panel.rs already
 // calls, so those call sites don't need to change, while the wrappers now read
-// the *actual* configured condition/trial counts from HUMAI_EXPDESIGN instead
-// of the old hardcoded 2x2 constants — this is what makes the Design tab's
-// "Conditions"/"Trials" controls actually take effect.
+// the *actual* configured condition/trial counts from the design passed in
+// instead of the old hardcoded 2x2 constants — this is what makes the Design
+// tab's "Conditions"/"Trials" controls actually take effect.
 use humai_core::experiment::TrialDescriptor;
 
+/// All Overview-tab experiment/chat orchestration state, owned by `HumaiApp`
+/// via `HumaiUiState::overview_chat` and threaded through render calls
+/// explicitly. This used to be a set of process-global `OnceLock<Mutex<T>>`
+/// statics — see ARCHITECTURE.md's former "Known Limitations" entry. Every
+/// field here is only ever touched on the UI thread (values are cloned out
+/// *before* being handed to a spawned Tokio task, never read back through this
+/// struct from inside one), so plain fields with no `Mutex` wrapping are
+/// correct — unlike `OllamaUiState`'s fields, which are genuinely written from
+/// spawned tasks and correctly stay `Arc<Mutex<T>>`.
+#[derive(Default)]
+pub(crate) struct OverviewChatUiState {
+    pub(crate) chat: ChatExample,
+    pub(crate) active_room_id: Option<String>,
+    pub(crate) room_order: Vec<String>,
+    pub(crate) exp_design: HumaiExpDesign,
+    pub(crate) session: ExperimentSessionState,
+    pub(crate) exp_run_counter: u64,
+    pub(crate) input_modal: InputModalState,
+    pub(crate) finished_popup_status: String,
+}
+
 #[derive(Clone, Debug, Default)]
-struct ExperimentSessionState {
+pub(crate) struct ExperimentSessionState {
     configured: bool,
     running: bool,
     experiment_id: Option<String>,
@@ -85,24 +100,14 @@ struct ExperimentSessionState {
     experiment_complete: bool,
 }
 
-fn current_design() -> HumaiExpDesign {
-    HUMAI_EXPDESIGN
-        .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
-        .lock()
-        .map(|design| design.clone())
-        .unwrap_or_default()
-}
-
-fn total_experiment_trials() -> usize {
-    let design = current_design();
+fn total_experiment_trials(design: &HumaiExpDesign) -> usize {
     humai_core::experiment::total_experiment_trials(
         humai_core::experiment::clamp_condition_count(design.conditions),
         humai_core::experiment::clamp_trials_per_condition(design.trials),
     )
 }
 
-fn trial_descriptor(index: usize) -> TrialDescriptor {
-    let design = current_design();
+fn trial_descriptor(design: &HumaiExpDesign, index: usize) -> TrialDescriptor {
     humai_core::experiment::trial_descriptor(
         index,
         &design.participant_id,
@@ -110,12 +115,17 @@ fn trial_descriptor(index: usize) -> TrialDescriptor {
     )
 }
 
-fn current_trial_descriptor_from_state(state: &ExperimentSessionState) -> TrialDescriptor {
-    let capped_index = state.trial_index.min(total_experiment_trials().saturating_sub(1));
-    trial_descriptor(capped_index)
+fn current_trial_descriptor_from_state(
+    design: &HumaiExpDesign,
+    state: &ExperimentSessionState,
+) -> TrialDescriptor {
+    let capped_index = state
+        .trial_index
+        .min(total_experiment_trials(design).saturating_sub(1));
+    trial_descriptor(design, capped_index)
 }
 
-fn experiment_status_label(state: &ExperimentSessionState) -> String {
+fn experiment_status_label(design: &HumaiExpDesign, state: &ExperimentSessionState) -> String {
     if !state.configured {
         return "Experiment".to_string();
     }
@@ -128,7 +138,7 @@ fn experiment_status_label(state: &ExperimentSessionState) -> String {
         return "Experiment Complete".to_string();
     }
 
-    let desc = current_trial_descriptor_from_state(state);
+    let desc = current_trial_descriptor_from_state(design, state);
     format!(
         "Experiment, Cond {}, Trial {}",
         desc.condition_index + 1,
@@ -138,37 +148,32 @@ fn experiment_status_label(state: &ExperimentSessionState) -> String {
 
 /// Refreshes `app.web_status`, the snapshot the local read-only web dashboard
 /// (`humai-web`) polls. Called at the trial-lifecycle points that already
-/// mutate `EXPERIMENT_SESSION` (session start, each trial advance/timeout,
+/// mutate `state.session` (session start, each trial advance/timeout,
 /// finalization) — not on every frame, since nothing here changes between
 /// those points.
-fn update_web_status(app: &Humai) {
-    let design = current_design();
-    let state = EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-        .map(|s| s.clone())
-        .unwrap_or_default();
-
-    let (condition_label, trial_in_condition, total_trials) =
-        if state.configured && !state.awaiting_final_answer && !state.experiment_complete {
-            let desc = current_trial_descriptor_from_state(&state);
-            let condition = humai_core::experiment::condition_name(desc.condition_index);
-            (
-                humai_core::experiment::condition_label(condition).to_string(),
-                desc.trial_in_condition + 1,
-                total_experiment_trials(),
-            )
-        } else {
-            (String::new(), 0, 0)
-        };
+fn update_web_status(app: &Humai, state: &OverviewChatUiState) {
+    let (condition_label, trial_in_condition, total_trials) = if state.session.configured
+        && !state.session.awaiting_final_answer
+        && !state.session.experiment_complete
+    {
+        let desc = current_trial_descriptor_from_state(&state.exp_design, &state.session);
+        let condition = humai_core::experiment::condition_name(desc.condition_index);
+        (
+            humai_core::experiment::condition_label(condition).to_string(),
+            desc.trial_in_condition + 1,
+            total_experiment_trials(&state.exp_design),
+        )
+    } else {
+        (String::new(), 0, 0)
+    };
 
     let snapshot = humai_web::WebStatusSnapshot {
-        design_name: design.name,
-        participant_id: design.participant_id,
+        design_name: state.exp_design.name.clone(),
+        participant_id: state.exp_design.participant_id.clone(),
         condition_label,
         trial_in_condition,
         total_trials,
-        running: state.running,
+        running: state.session.running,
         timer_display: humai_core::timer::main_timer_display(),
         // humai-web's get_status route overwrites this from the live vault
         // lock flag on every request — this value is never actually read.
@@ -179,11 +184,12 @@ fn update_web_status(app: &Humai) {
 }
 
 fn condition_instruction_for_state(
+    design: &HumaiExpDesign,
     state: &ExperimentSessionState,
     coop_prompt: &str,
     argum_prompt: &str,
 ) -> String {
-    let desc = current_trial_descriptor_from_state(state);
+    let desc = current_trial_descriptor_from_state(design, state);
     let condition = humai_core::experiment::condition_name(desc.condition_index);
 
     match condition {
@@ -223,52 +229,44 @@ fn session_metadata_from_state(state: &ExperimentSessionState) -> Option<Session
     })
 }
 
-fn inference_trace_context(source: &str) -> InferenceTraceContext {
-    let session = EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-        .ok()
-        .map(|state| state.clone());
+fn inference_trace_context(session: &ExperimentSessionState, source: &str) -> InferenceTraceContext {
     InferenceTraceContext {
         source: source.to_string(),
-        experiment_id: session.as_ref().and_then(|s| s.experiment_id.clone()),
-        run_id: session.as_ref().and_then(|s| s.run_id.clone()),
+        experiment_id: session.experiment_id.clone(),
+        run_id: session.run_id.clone(),
         turn_index: Some(experiment_csv::current_turn_index() as u32),
         node_global_id: None,
     }
 }
 
-fn assistant_prompt_for_current_condition(app: &Humai) -> String {
-    let state = EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-        .map(|state| state.clone())
-        .unwrap_or_default();
-
+fn assistant_prompt_for_current_condition(
+    app: &Humai,
+    design: &HumaiExpDesign,
+    session: &ExperimentSessionState,
+) -> String {
     format!(
         "{}\n\n{}",
         app.assistant_prompt,
         condition_instruction_for_state(
-            &state,
+            design,
+            session,
             &app.coop_agent_prompt,
             &app.argum_agent_prompt,
         )
     )
 }
 
-fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, timed_out: bool) {
+fn advance_to_next_trial(
+    app: &Humai,
+    store: &Store,
+    state: &mut OverviewChatUiState,
+    timed_out: bool,
+) {
     let was_running = humai_core::timer::main_timer_is_running();
-    let mut session = match EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-    {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
 
-    if !session.configured {
+    if !state.session.configured {
         append_message_to_chat_and_store(
-            chat,
+            &mut state.chat,
             store,
             ChatMessage {
                 content: "Submit experiment settings before advancing trials.".to_string(),
@@ -282,37 +280,28 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
         return;
     }
 
-    if session.awaiting_final_answer || session.experiment_complete {
+    if state.session.awaiting_final_answer || state.session.experiment_complete {
         return;
     }
 
-    if session.running {
+    if state.session.running {
         end_trial(timed_out);
     }
 
-    let next_index = session.trial_index + 1;
-    if next_index >= total_experiment_trials() {
-        session.running = false;
-        session.trial_timeout_popup_open = false;
-        drop(session);
+    let next_index = state.session.trial_index + 1;
+    if next_index >= total_experiment_trials(&state.exp_design) {
+        state.session.running = false;
+        state.session.trial_timeout_popup_open = false;
         humai_core::timer::pause_main_timer();
-        set_experiment_running(false);
 
-        let final_question = HUMAI_EXPDESIGN
-            .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
-            .lock()
-            .map(|design| design.question.trim().to_string())
-            .unwrap_or_default();
+        let final_question = state.exp_design.question.trim().to_string();
 
         if final_question.is_empty() {
-            finalize_experiment(app, chat, store);
-        } else if let Ok(mut session) = EXPERIMENT_SESSION
-            .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-            .lock()
-        {
-            session.awaiting_final_answer = true;
+            finalize_experiment(app, state, store);
+        } else {
+            state.session.awaiting_final_answer = true;
             append_message_to_chat_and_store(
-                chat,
+                &mut state.chat,
                 store,
                 ChatMessage {
                     content: final_question,
@@ -325,28 +314,24 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
             );
         }
 
-        update_web_status(app);
+        update_web_status(app, state);
         return;
     }
 
-    session.trial_index = next_index;
-    session.trial_memory_start_idx = chat.messages.len();
-    session.trial_timeout_popup_open = false;
-    let desc = current_trial_descriptor_from_state(&session);
+    state.session.trial_index = next_index;
+    state.session.trial_memory_start_idx = state.chat.messages.len();
+    state.session.trial_timeout_popup_open = false;
+    let desc = current_trial_descriptor_from_state(&state.exp_design, &state.session);
     let condition = humai_core::experiment::condition_name(desc.condition_index);
-    let session_meta = session_metadata_from_state(&session);
-    drop(session);
-    update_web_status(app);
+    let session_meta = session_metadata_from_state(&state.session);
+    update_web_status(app, state);
 
     if let Some(session_meta) = session_meta {
-        begin_trial(
-            session_meta,
-            trial_metadata_from_descriptor(desc),
-        );
+        begin_trial(session_meta, trial_metadata_from_descriptor(desc));
     }
 
     append_message_to_chat_and_store(
-        chat,
+        &mut state.chat,
         store,
         ChatMessage {
             content: format!(
@@ -368,19 +353,13 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
         humai_core::timer::start_main_timer();
     }
 
-    let design = HUMAI_EXPDESIGN
-        .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
-        .lock()
-        .map(|design| design.clone())
-        .unwrap_or_default();
-
-    let topic = design.topic.trim().to_string();
-    let participant_id = design.participant_id.trim().to_string();
+    let topic = state.exp_design.topic.trim().to_string();
+    let participant_id = state.exp_design.participant_id.trim().to_string();
     let model = app.selected_ollama_model.trim().to_string();
 
     if topic.is_empty() || participant_id.is_empty() || model.is_empty() {
         append_message_to_chat_and_store(
-            chat,
+            &mut state.chat,
             store,
             ChatMessage {
                 content: "Cannot start next trial question: missing topic, participant ID, or model."
@@ -395,44 +374,38 @@ fn advance_to_next_trial(app: &Humai, store: &Store, chat: &mut ChatExample, tim
         return;
     }
 
-    spawn_ollama_opening_question(app, chat, topic, participant_id, model);
+    spawn_ollama_opening_question(
+        app,
+        &state.chat,
+        &state.exp_design,
+        &state.session,
+        topic,
+        participant_id,
+        model,
+    );
 }
 
-fn handle_trial_timeout(app: &Humai, store: &Store, chat: &mut ChatExample) {
+fn handle_trial_timeout(app: &Humai, store: &Store, state: &mut OverviewChatUiState) {
     if !humai_core::timer::main_timer_is_running() {
         return;
     }
 
-    let trial_seconds = HUMAI_EXPDESIGN
-        .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
-        .lock()
-        .map(|design| design.trial_seconds.max(1) as u64)
-        .unwrap_or(120);
+    let trial_seconds = state.exp_design.trial_seconds.max(1) as u64;
 
     if humai_core::timer::main_timer_elapsed_seconds() < trial_seconds {
         return;
     }
 
-    let desc = {
-        let mut session = match EXPERIMENT_SESSION
-            .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-            .lock()
-        {
-            Ok(guard) => guard,
-            Err(_) => return,
-        };
+    if !state.session.configured || !state.session.running || state.session.awaiting_final_answer {
+        return;
+    }
 
-        if !session.configured || !session.running || session.awaiting_final_answer {
-            return;
-        }
-
-        session.trial_timeout_popup_open = true;
-        current_trial_descriptor_from_state(&session)
-    };
+    state.session.trial_timeout_popup_open = true;
+    let desc = current_trial_descriptor_from_state(&state.exp_design, &state.session);
 
     let condition = humai_core::experiment::condition_name(desc.condition_index);
     append_message_to_chat_and_store(
-        chat,
+        &mut state.chat,
         store,
         ChatMessage {
             content: format!(
@@ -450,15 +423,11 @@ fn handle_trial_timeout(app: &Humai, store: &Store, chat: &mut ChatExample) {
         },
     );
 
-    advance_to_next_trial(app, store, chat, true);
+    advance_to_next_trial(app, store, state, true);
 }
 
-fn render_trial_timeout_popup(ctx: &egui::Context) {
-    let mut open = EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-        .map(|state| state.trial_timeout_popup_open)
-        .unwrap_or(false);
+fn render_trial_timeout_popup(ctx: &egui::Context, state: &mut OverviewChatUiState) {
+    let mut open = state.session.trial_timeout_popup_open;
 
     if !open {
         return;
@@ -488,47 +457,21 @@ fn render_trial_timeout_popup(ctx: &egui::Context) {
         open = false;
     }
 
-    if let Ok(mut state) = EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-    {
-        state.trial_timeout_popup_open = open;
+    state.session.trial_timeout_popup_open = open;
+}
+
+fn finalize_experiment(app: &Humai, state: &mut OverviewChatUiState, store: &Store) {
+    if state.session.experiment_complete {
+        return;
     }
-}
-
-fn awaiting_final_answer() -> bool {
-    EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-        .map(|state| state.awaiting_final_answer)
-        .unwrap_or(false)
-}
-
-fn experiment_complete() -> bool {
-    EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-        .map(|state| state.experiment_complete)
-        .unwrap_or(false)
-}
-
-fn finalize_experiment(app: &Humai, chat: &mut ChatExample, store: &Store) {
-    if let Ok(mut state) = EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-    {
-        if state.experiment_complete {
-            return;
-        }
-        state.awaiting_final_answer = false;
-        state.experiment_complete = true;
-        state.finished_popup_open = true;
-    }
+    state.session.awaiting_final_answer = false;
+    state.session.experiment_complete = true;
+    state.session.finished_popup_open = true;
 
     end_experiment();
-    update_web_status(app);
+    update_web_status(app, state);
     append_message_to_chat_and_store(
-        chat,
+        &mut state.chat,
         store,
         ChatMessage {
             content: "Experiment Finished".to_string(),
@@ -541,26 +484,14 @@ fn finalize_experiment(app: &Humai, chat: &mut ChatExample, store: &Store) {
     );
 }
 
-fn submit_final_answer(app: &Humai, chat: &mut ChatExample, store: &Store, answer: &str) {
-    {
-        let mut should_finalize = false;
-        if let Ok(mut state) = EXPERIMENT_SESSION
-            .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-            .lock()
-        {
-            if !state.awaiting_final_answer || state.experiment_complete {
-                return;
-            }
-            state.awaiting_final_answer = false;
-            should_finalize = true;
-        }
-        if !should_finalize {
-            return;
-        }
+fn submit_final_answer(app: &Humai, state: &mut OverviewChatUiState, store: &Store, answer: &str) {
+    if !state.session.awaiting_final_answer || state.session.experiment_complete {
+        return;
     }
+    state.session.awaiting_final_answer = false;
 
     record_final_answer(answer);
-    finalize_experiment(app, chat, store);
+    finalize_experiment(app, state, store);
 }
 
 fn copy_experiment_csv_to_desktop() -> Result<PathBuf, String> {
@@ -583,12 +514,8 @@ fn copy_experiment_csv_to_desktop() -> Result<PathBuf, String> {
     Ok(destination)
 }
 
-fn render_experiment_finished_popup(ctx: &egui::Context) {
-    let mut open = EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-        .map(|state| state.finished_popup_open)
-        .unwrap_or(false);
+fn render_experiment_finished_popup(ctx: &egui::Context, state: &mut OverviewChatUiState) {
+    let mut open = state.session.finished_popup_open;
 
     if !open {
         return;
@@ -599,8 +526,6 @@ fn render_experiment_finished_popup(ctx: &egui::Context) {
 
     let mut close_clicked = false;
     let mut download_clicked = false;
-    static FINISHED_POPUP_STATUS: OnceLock<Mutex<String>> = OnceLock::new();
-    let status = FINISHED_POPUP_STATUS.get_or_init(|| Mutex::new(String::new()));
 
     egui::Window::new("Experiment Finished")
         .collapsible(false)
@@ -623,19 +548,15 @@ fn render_experiment_finished_popup(ctx: &egui::Context) {
                         close_clicked = true;
                     }
                 });
-                if let Ok(status) = status.lock()
-                    && !status.is_empty()
-                {
+                if !state.finished_popup_status.is_empty() {
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new(status.as_str()).small().weak());
+                    ui.label(egui::RichText::new(state.finished_popup_status.as_str()).small().weak());
                 }
             });
         });
 
-    if download_clicked
-        && let Ok(mut popup_status) = status.lock()
-    {
-        *popup_status = match copy_experiment_csv_to_desktop() {
+    if download_clicked {
+        state.finished_popup_status = match copy_experiment_csv_to_desktop() {
             Ok(path) => format!("Saved to {}", path.display()),
             Err(err) => err,
         };
@@ -643,17 +564,10 @@ fn render_experiment_finished_popup(ctx: &egui::Context) {
 
     if close_clicked {
         open = false;
-        if let Ok(mut popup_status) = status.lock() {
-            popup_status.clear();
-        }
+        state.finished_popup_status.clear();
     }
 
-    if let Ok(mut state) = EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-    {
-        state.finished_popup_open = open;
-    }
+    state.session.finished_popup_open = open;
 }
 
 fn experiment_hash_hex(input: &str) -> String {
@@ -666,31 +580,14 @@ fn derive_experiment_id_local(signature: &str) -> String {
     format!("exp_{}", &experiment_hash_hex(signature)[..12])
 }
 
-fn new_run_id_local() -> String {
+fn new_run_id_local(counter: &mut u64) -> String {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let count = EXP_RUN_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let count = *counter;
+    *counter += 1;
     format!("run_{}_{:04}", millis, count)
-}
-
-fn set_experiment_running(is_running: bool) {
-    if let Ok(mut session) = EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-    {
-        session.running = is_running;
-    }
-}
-
-fn mark_experiment_configured() {
-    if let Ok(mut session) = EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-    {
-        session.configured = true;
-    }
 }
 
 fn append_message_to_chat_and_store(
@@ -704,14 +601,6 @@ fn append_message_to_chat_and_store(
     if let Some(room_id) = &chat.selected_room {
         let _ = store.append_message(room_id, &message, &ts);
     }
-}
-
-fn current_trial_memory_start_index() -> usize {
-    EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-        .map(|state| state.trial_memory_start_idx)
-        .unwrap_or(0)
 }
 
 fn agent_memory_from_chat(
@@ -744,6 +633,8 @@ fn agent_memory_from_chat(
 fn spawn_ollama_opening_question(
     app: &Humai,
     chat: &ChatExample,
+    design: &HumaiExpDesign,
+    session: &ExperimentSessionState,
     topic: String,
     participant_id: String,
     model: String,
@@ -753,10 +644,10 @@ fn spawn_ollama_opening_question(
     let selected_room = chat.selected_room.clone();
     let store_path = chat_db_path(app);
     let ollama_host = app.ollama_host.clone();
-    let assistant_prompt = assistant_prompt_for_current_condition(app);
+    let assistant_prompt = assistant_prompt_for_current_condition(app, design, session);
     let history_size = app.conversation_history_size;
     let trace_context =
-        inference_trace_context("overview_chat.humai_agent.opening_question");
+        inference_trace_context(session, "overview_chat.humai_agent.opening_question");
 
     if let Ok(mut flag) = waiting.lock() {
         *flag = true;
@@ -811,27 +702,14 @@ fn spawn_ollama_opening_question(
     });
 }
 
-fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample) {
-    let design = HUMAI_EXPDESIGN
-        .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
-        .lock()
-        .map(|design| design.clone())
-        .unwrap_or_default();
-
-    let mut session = EXPERIMENT_SESSION
-        .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-        .lock()
-        .ok();
-
-    if let Some(state) = session.as_deref_mut()
-        && (state.running || state.awaiting_final_answer)
-    {
+fn start_experiment_from_play(app: &Humai, store: &Store, state: &mut OverviewChatUiState) {
+    if state.session.running || state.session.awaiting_final_answer {
         return;
     }
 
-    if design.participant_id.trim().is_empty() {
+    if state.exp_design.participant_id.trim().is_empty() {
         append_message_to_chat_and_store(
-            chat,
+            &mut state.chat,
             store,
             ChatMessage {
                 content: "Submit experiment settings and provide a Participant ID before starting."
@@ -846,9 +724,9 @@ fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample
         return;
     }
 
-    if design.topic.trim().is_empty() {
+    if state.exp_design.topic.trim().is_empty() {
         append_message_to_chat_and_store(
-            chat,
+            &mut state.chat,
             store,
             ChatMessage {
                 content: "Please set a topic before starting the experiment.".to_string(),
@@ -865,7 +743,7 @@ fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample
     let model = app.selected_ollama_model.trim().to_string();
     if model.is_empty() {
         append_message_to_chat_and_store(
-            chat,
+            &mut state.chat,
             store,
             ChatMessage {
                 content: "Please select a global Ollama model in Settings before starting."
@@ -882,37 +760,29 @@ fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample
 
     humai_core::timer::start_main_timer();
 
-    let topic = design.topic.trim().to_string();
-    let participant_id = design.participant_id.trim().to_string();
+    let topic = state.exp_design.topic.trim().to_string();
+    let participant_id = state.exp_design.participant_id.trim().to_string();
     let experiment_id = derive_experiment_id_local(&format!(
         "{}|{}|{}",
-        design.name.trim(),
+        state.exp_design.name.trim(),
         participant_id,
         topic
     ));
-    let run_id = new_run_id_local();
+    let run_id = new_run_id_local(&mut state.exp_run_counter);
 
-    if let Some(state) = session.as_deref_mut() {
-        state.running = true;
-        state.configured = true;
-        state.experiment_id = Some(experiment_id.clone());
-        state.run_id = Some(run_id.clone());
-        state.trial_index = 0;
-        state.trial_memory_start_idx = chat.messages.len();
-        state.trial_timeout_popup_open = false;
-        state.awaiting_final_answer = false;
-        state.finished_popup_open = false;
-        state.experiment_complete = false;
-    }
+    state.session.running = true;
+    state.session.configured = true;
+    state.session.experiment_id = Some(experiment_id.clone());
+    state.session.run_id = Some(run_id.clone());
+    state.session.trial_index = 0;
+    state.session.trial_memory_start_idx = state.chat.messages.len();
+    state.session.trial_timeout_popup_open = false;
+    state.session.awaiting_final_answer = false;
+    state.session.finished_popup_open = false;
+    state.session.experiment_complete = false;
 
-    let design_snapshot = design_snapshot(&design);
-    let trial_desc = session
-        .as_deref()
-        .map(current_trial_descriptor_from_state)
-        .unwrap_or(TrialDescriptor {
-            condition_index: 0,
-            trial_in_condition: 0,
-        });
+    let design_snapshot = design_snapshot(&state.exp_design);
+    let trial_desc = current_trial_descriptor_from_state(&state.exp_design, &state.session);
     begin_session(
         design_snapshot,
         SessionMetadata {
@@ -923,12 +793,10 @@ fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample
         trial_metadata_from_descriptor(trial_desc),
     );
 
-    // Release the lock before creating prompts that also read experiment state.
-    drop(session);
-    update_web_status(app);
+    update_web_status(app, state);
 
     append_message_to_chat_and_store(
-        chat,
+        &mut state.chat,
         store,
         ChatMessage {
             content: "Experiment Started".to_string(),
@@ -940,7 +808,15 @@ fn start_experiment_from_play(app: &Humai, store: &Store, chat: &mut ChatExample
         },
     );
 
-    spawn_ollama_opening_question(app, chat, topic, participant_id, model);
+    spawn_ollama_opening_question(
+        app,
+        &state.chat,
+        &state.exp_design,
+        &state.session,
+        topic,
+        participant_id,
+        model,
+    );
 }
 
 #[derive(Clone, Debug)]
@@ -984,7 +860,7 @@ enum ModalAction {
 }
 
 #[derive(Clone, Debug)]
-struct InputModalState {
+pub(crate) struct InputModalState {
     open: bool,
     title: String,
     label: String,
@@ -1031,7 +907,7 @@ pub(crate) fn build_overview_tiles_tree() -> egui_tiles::Tree<OverviewPane> {
 struct OverviewPanesBehavior<'a> {
     app: &'a mut Humai,
     store: &'a Store,
-    chat: &'a mut ChatExample,
+    state: &'a mut OverviewChatUiState,
     human_to_agent_mode: bool,
 }
 
@@ -1051,10 +927,12 @@ impl egui_tiles::Behavior<OverviewPane> for OverviewPanesBehavior<'_> {
     ) -> egui_tiles::UiResponse {
         match pane {
             OverviewPane::Sidebar => {
-                self.chat.sidebar_ui(ui, self.store);
+                self.state
+                    .chat
+                    .sidebar_ui(ui, self.store, &self.state.exp_design.participant_id);
             }
             OverviewPane::Chat => {
-                render_chat_columns(self.app, ui, self.store, self.chat, self.human_to_agent_mode);
+                render_chat_columns(self.app, ui, self.store, self.state, self.human_to_agent_mode);
             }
         }
         egui_tiles::UiResponse::None
@@ -1079,7 +957,6 @@ pub(crate) fn render_overview_panel(
     };
 
     let convs = store.list_conversations(50).unwrap_or_default();
-    let room_order = ROOM_ORDER.get_or_init(|| Mutex::new(Vec::new()));
 
     let mut rooms_by_id: HashMap<String, Room> = convs
         .iter()
@@ -1096,15 +973,17 @@ pub(crate) fn render_overview_panel(
         })
         .collect();
 
-    let mut order = room_order.lock_recover();
-    order.retain(|id| rooms_by_id.contains_key(id));
+    let state = &mut ui_state.overview_chat;
+
+    state.room_order.retain(|id| rooms_by_id.contains_key(id));
     for c in &convs {
-        if !order.iter().any(|id| id == &c.id) {
-            order.push(c.id.clone());
+        if !state.room_order.iter().any(|id| id == &c.id) {
+            state.room_order.push(c.id.clone());
         }
     }
 
-    let mut rooms: Vec<Room> = order
+    let mut rooms: Vec<Room> = state
+        .room_order
         .iter()
         .filter_map(|id| rooms_by_id.remove(id))
         .collect();
@@ -1120,29 +999,25 @@ pub(crate) fn render_overview_panel(
             }
         };
         rooms.push(Room::new(id.clone(), format!("Room {}", &id[..8])));
-        order.push(id);
+        state.room_order.push(id);
     }
-
-    let chat_cell = CHAT.get_or_init(|| Mutex::new(ChatExample::new()));
-    let active_room_id = ACTIVE_ROOM_ID.get_or_init(|| Mutex::new(None));
-    let mut chat = chat_cell.lock_recover();
 
     let graph_running = app.conversation_graph_running.load(Ordering::Acquire);
     let human_to_agent_mode = matches!(app.chat_mode, GlobalChatMode::Enabled);
-    chat.room_mode_human_agent = human_to_agent_mode;
-    chat.set_main_input_enabled(human_to_agent_mode);
+    state.chat.room_mode_human_agent = human_to_agent_mode;
+    state.chat.set_main_input_enabled(human_to_agent_mode);
 
-    for item in chat.inbox.drain() {
+    for item in state.chat.inbox.drain() {
         let ts = ChatExample::display_time_for_message(&item);
-        chat.message_timestamps.push(ts);
-        chat.messages.push(item);
+        state.chat.message_timestamps.push(ts);
+        state.chat.messages.push(item);
     }
 
-    handle_trial_timeout(app, &store, &mut chat);
+    handle_trial_timeout(app, &store, state);
 
-    chat.set_rooms(rooms.clone());
-    if chat.selected_room.is_none() {
-        chat.selected_room = rooms.first().map(|room| room.id.clone());
+    state.chat.set_rooms(rooms.clone());
+    if state.chat.selected_room.is_none() {
+        state.chat.selected_room = rooms.first().map(|room| room.id.clone());
     }
 
     if graph_running || humai_core::timer::main_timer_is_running() {
@@ -1178,7 +1053,7 @@ pub(crate) fn render_overview_panel(
     // "between" the sidebar and chat panes, just once per frame before either
     // renders, so it's pulled out of the tile tree entirely rather than trying
     // to make it happen at a specific point in egui_tiles' render order.
-    persist_and_hydrate_selected_room(&store, &rooms, &mut chat, active_room_id);
+    persist_and_hydrate_selected_room(&store, &rooms, state);
 
     let split_height = ui.available_height() - 20.0;
     egui::Frame::default()
@@ -1196,7 +1071,7 @@ pub(crate) fn render_overview_panel(
             let mut behavior = OverviewPanesBehavior {
                 app,
                 store: &store,
-                chat: &mut chat,
+                state: &mut ui_state.overview_chat,
                 human_to_agent_mode,
             };
             tree.ui(&mut behavior, ui);
@@ -1206,21 +1081,18 @@ pub(crate) fn render_overview_panel(
 fn persist_and_hydrate_selected_room(
     store: &Store,
     rooms: &[Room],
-    chat: &mut ChatExample,
-    active_room_id: &Mutex<Option<String>>,
+    state: &mut OverviewChatUiState,
 ) {
-    let previous_room_id = {
-        let active = active_room_id.lock_recover();
-        active.clone()
-    };
-    let next_room_id = chat.selected_room.clone();
+    let previous_room_id = state.active_room_id.clone();
+    let next_room_id = state.chat.selected_room.clone();
     if previous_room_id != next_room_id {
         if let Some(prev_id) = previous_room_id {
             let prev_still_exists = rooms.iter().any(|r| r.id == prev_id);
             if prev_still_exists {
                 let _ = store.delete_messages_for_conversation(&prev_id);
-                for (idx, msg) in chat.messages.iter().enumerate() {
-                    let ts = chat
+                for (idx, msg) in state.chat.messages.iter().enumerate() {
+                    let ts = state
+                        .chat
                         .message_timestamps
                         .get(idx)
                         .cloned()
@@ -1232,11 +1104,10 @@ fn persist_and_hydrate_selected_room(
 
         if let Some(next_id) = &next_room_id {
             let (msgs, ts) = store.load_messages(next_id).unwrap_or((vec![], vec![]));
-            chat.hydrate(msgs, ts);
+            state.chat.hydrate(msgs, ts);
         }
 
-        let mut active = active_room_id.lock_recover();
-        *active = next_room_id;
+        state.active_room_id = next_room_id;
     }
 }
 
@@ -1244,38 +1115,40 @@ fn render_chat_columns(
     app: &mut Humai,
     ui: &mut egui::Ui,
     store: &Store,
-    chat: &mut ChatExample,
+    state: &mut OverviewChatUiState,
     human_to_agent_mode: bool,
 ) {
     let row_height = ui.available_height();
-    render_chat_rectangle(app, ui, store, chat, human_to_agent_mode, row_height);
+    render_chat_rectangle(app, ui, store, state, human_to_agent_mode, row_height);
 }
 
-pub(crate) fn render_design_panel(app: &mut Humai, ui: &mut egui::Ui) {
-    let chat_cell = CHAT.get_or_init(|| Mutex::new(ChatExample::new()));
-    let chat = chat_cell.lock_recover();
+pub(crate) fn render_design_panel(
+    app: &mut Humai,
+    ui: &mut egui::Ui,
+    ui_state: &mut crate::ui::HumaiUiState,
+) {
     let human_to_agent_mode = matches!(app.chat_mode, GlobalChatMode::Enabled);
     let metrics_config = app.metrics_config.clone();
     render_right_bar(
         ui,
         app,
-        &chat,
+        &mut ui_state.overview_chat,
         human_to_agent_mode,
         &metrics_config,
     );
 }
 
-pub(crate) fn render_experiment_modals(ctx: &egui::Context) {
-    render_participant_id_modal(ctx);
-    render_trial_timeout_popup(ctx);
-    render_experiment_finished_popup(ctx);
+pub(crate) fn render_experiment_modals(ctx: &egui::Context, state: &mut OverviewChatUiState) {
+    render_participant_id_modal(ctx, state);
+    render_trial_timeout_popup(ctx, state);
+    render_experiment_finished_popup(ctx, state);
 }
 
 fn render_chat_rectangle(
     app: &mut Humai,
     ui: &mut egui::Ui,
     store: &Store,
-    chat: &mut ChatExample,
+    state: &mut OverviewChatUiState,
     human_to_agent_mode: bool,
     row_height: f32,
 ) {
@@ -1307,11 +1180,8 @@ fn render_chat_rectangle(
                         .stroke(bar_stroke)
                         .inner_margin(egui::Margin::symmetric(8, 0))
                         .show(ui, |ui| {
-                            let status_label = EXPERIMENT_SESSION
-                                .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-                                .lock()
-                                .map(|state| experiment_status_label(&state))
-                                .unwrap_or_else(|_| "Experiment".to_string());
+                            let status_label =
+                                experiment_status_label(&state.exp_design, &state.session);
 
                             ui.allocate_ui_with_layout(
                                 egui::vec2(ui.available_width(), top_row_height),
@@ -1319,15 +1189,15 @@ fn render_chat_rectangle(
                                 |ui| {
                                     ui.label(egui::RichText::new(status_label).strong());
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        let trial_navigation_enabled =
-                                            !awaiting_final_answer() && !experiment_complete();
+                                        let trial_navigation_enabled = !state.session.awaiting_final_answer
+                                            && !state.session.experiment_complete;
                                         let next_btn = egui::Button::new(">>").small();
                                         if ui
                                             .add_enabled(trial_navigation_enabled, next_btn)
                                             .on_hover_text("Move to next trial")
                                             .clicked()
                                         {
-                                            advance_to_next_trial(app, store, chat, false);
+                                            advance_to_next_trial(app, store, state, false);
                                         }
 
                                         let stop_btn = egui::Button::new(
@@ -1343,18 +1213,13 @@ fn render_chat_rectangle(
                                             humai_core::timer::stop_and_reset_main_timer();
                                             end_trial(false);
                                             end_experiment();
-                                            set_experiment_running(false);
-                                            if let Ok(mut state) = EXPERIMENT_SESSION
-                                                .get_or_init(|| Mutex::new(ExperimentSessionState::default()))
-                                                .lock()
-                                            {
-                                                state.trial_index = 0;
-                                                state.trial_memory_start_idx = 0;
-                                                state.trial_timeout_popup_open = false;
-                                                state.awaiting_final_answer = false;
-                                                state.finished_popup_open = false;
-                                                state.experiment_complete = false;
-                                            }
+                                            state.session.running = false;
+                                            state.session.trial_index = 0;
+                                            state.session.trial_memory_start_idx = 0;
+                                            state.session.trial_timeout_popup_open = false;
+                                            state.session.awaiting_final_answer = false;
+                                            state.session.finished_popup_open = false;
+                                            state.session.experiment_complete = false;
                                         }
 
                                         let pause_btn = egui::Button::new(
@@ -1381,14 +1246,14 @@ fn render_chat_rectangle(
                                         .small();
                                         if ui
                                             .add_enabled(
-                                                !awaiting_final_answer()
+                                                !state.session.awaiting_final_answer
                                                     && !humai_core::timer::main_timer_is_running(),
                                                 play_btn,
                                             )
                                             .on_hover_text("Start timer")
                                             .clicked()
                                         {
-                                            start_experiment_from_play(app, store, chat);
+                                            start_experiment_from_play(app, store, state);
                                         }
                                     });
                                 },
@@ -1415,9 +1280,9 @@ fn render_chat_rectangle(
                                 .show(ui, |ui| {
                                     ui.vertical(|ui| {
                                         ui.set_width(ui.available_width());
-                                        let len = chat.messages.len();
+                                        let len = state.chat.messages.len();
                                         let time_col_width = 82.0;
-                                        for (i, msg) in chat.messages.iter().enumerate() {
+                                        for (i, msg) in state.chat.messages.iter().enumerate() {
                                             ui.allocate_ui_with_layout(
                                                 egui::vec2(ui.available_width(), 0.0),
                                                 egui::Layout::left_to_right(egui::Align::Min),
@@ -1435,7 +1300,8 @@ fn render_chat_rectangle(
                                                                 .corner_radius(egui::CornerRadius::same(2))
                                                                 .inner_margin(egui::Margin::symmetric(6, 2))
                                                                 .show(ui, |ui| {
-                                                                    let ts = chat
+                                                                    let ts = state
+                                                                        .chat
                                                                         .message_timestamps
                                                                         .get(i)
                                                                         .cloned()
@@ -1476,7 +1342,7 @@ fn render_chat_rectangle(
                                                 ui.add_space(4.0);
                                             }
                                         }
-                                        if *chat.waiting_for_response().lock_recover() {
+                                        if *state.chat.waiting_for_response().lock_recover() {
                                             ui.horizontal(|ui| {
                                                 ui.spinner();
                                                 ui.label(
@@ -1484,7 +1350,6 @@ fn render_chat_rectangle(
                                                         .small()
                                                         .weak(),
                                                 );
-                                                
                                             });
                                         }
                                     });
@@ -1497,25 +1362,21 @@ fn render_chat_rectangle(
             ui.separator();
             ui.add_space(6.0);
 
-            
-
-            
-
-
             ui.add_enabled_ui(
-                (human_to_agent_mode && !experiment_complete()) || awaiting_final_answer(),
+                (human_to_agent_mode && !state.session.experiment_complete)
+                    || state.session.awaiting_final_answer,
                 |ui| {
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
                     let input_width = (ui.available_width() - 72.0).max(220.0);
-                    let hint = if awaiting_final_answer() {
+                    let hint = if state.session.awaiting_final_answer {
                         "Answer the final question"
                     } else {
                         "Type a message"
                     };
                     let response = ui.add_sized(
                         egui::vec2(input_width, input_row_height),
-                        egui::TextEdit::singleline(&mut chat.input_text).hint_text(hint),
+                        egui::TextEdit::singleline(&mut state.chat.input_text).hint_text(hint),
                     );
                     let send_clicked = ui
                         .add_sized(
@@ -1525,9 +1386,9 @@ fn render_chat_rectangle(
                         .clicked()
                         || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
 
-                    if send_clicked && !chat.input_text.trim().is_empty() {
-                        let message_text = chat.input_text.trim().to_string();
-                        chat.input_text.clear();
+                    if send_clicked && !state.chat.input_text.trim().is_empty() {
+                        let message_text = state.chat.input_text.trim().to_string();
+                        state.chat.input_text.clear();
 
                         let user_message = ChatMessage {
                             content: message_text.clone(),
@@ -1538,32 +1399,33 @@ fn render_chat_rectangle(
                             assistant_generation: None,
                         };
                         let ts = ChatExample::current_timestamp_string();
-                        chat.messages.push(user_message.clone());
-                        chat.message_timestamps.push(ts.clone());
+                        state.chat.messages.push(user_message.clone());
+                        state.chat.message_timestamps.push(ts.clone());
 
-                        if let Some(room_id) = &chat.selected_room {
+                        if let Some(room_id) = &state.chat.selected_room {
                             let _ = store.append_message(room_id, &user_message, &ts);
                         }
 
-                        if awaiting_final_answer() {
-                            submit_final_answer(app, chat, store, &message_text);
+                        if state.session.awaiting_final_answer {
+                            submit_final_answer(app, state, store, &message_text);
                         } else {
                         record_human_transcript(&message_text);
 
-                        let trial_memory_start_index = current_trial_memory_start_index();
+                        let trial_memory_start_index = state.session.trial_memory_start_idx;
                         let memory_snapshot =
-                            agent_memory_from_chat(chat, trial_memory_start_index);
+                            agent_memory_from_chat(&state.chat, trial_memory_start_index);
 
-                        let tx = chat.inbox.sender();
-                        let waiting = chat.waiting_for_response().clone();
-                        let selected_room = chat.selected_room.clone();
+                        let tx = state.chat.inbox.sender();
+                        let waiting = state.chat.waiting_for_response().clone();
+                        let selected_room = state.chat.selected_room.clone();
                         let store_path = chat_db_path(app);
                         let model = app.selected_ollama_model.trim().to_string();
                         let ollama_host = app.ollama_host.clone();
-                        let assistant_prompt = assistant_prompt_for_current_condition(app);
+                        let assistant_prompt =
+                            assistant_prompt_for_current_condition(app, &state.exp_design, &state.session);
                         let history_size = app.conversation_history_size;
                         let trace_context =
-                            inference_trace_context("overview_chat.humai_agent.reply");
+                            inference_trace_context(&state.session, "overview_chat.humai_agent.reply");
                         if model.is_empty() {
                             let _ = tx.send(ChatMessage {
                                 content: "Please select a global Ollama model in Settings.".to_string(),
@@ -1642,7 +1504,7 @@ fn render_chat_rectangle(
 fn render_right_bar(
     ui: &mut egui::Ui,
     app: &mut Humai,
-    chat: &ChatExample,
+    state: &mut OverviewChatUiState,
     human_to_agent_mode: bool,
     metrics_config: &MetricsConfig,
 ) {
@@ -1654,17 +1516,16 @@ fn render_right_bar(
         .inner_margin(egui::Margin::same(6))
         .show(ui, |ui| {
             ui.vertical(|ui| {
-                let exp_design = HUMAI_EXPDESIGN.get_or_init(|| Mutex::new(HumaiExpDesign::default()));
-                let exp_snapshot = exp_design
-                    .lock()
-                    .map(|v| v.clone())
-                    .unwrap_or_default();
-                let selected_room_id = chat.selected_room.as_deref().unwrap_or("(none)");
-                let selected_room_name = chat
+                let exp_snapshot = state.exp_design.clone();
+                let selected_room_id = state.chat.selected_room.as_deref().unwrap_or("(none)");
+                let selected_room_name = state
+                    .chat
                     .selected_room
                     .as_ref()
                     .and_then(|id| {
-                        chat.rooms
+                        state
+                            .chat
+                            .rooms
                             .iter()
                             .find(|room| room.id == *id)
                             .map(|room| room.name.as_str())
@@ -1679,7 +1540,7 @@ fn render_right_bar(
                     "Chat input mode: {}",
                     if human_to_agent_mode { "Enabled" } else { "Disabled" }
                 ));
-                ui.label(format!("Messages in view: {}", chat.messages.len()));
+                ui.label(format!("Messages in view: {}", state.chat.messages.len()));
                 ui.add_space(4.0);
                 ui.separator();
                 ui.add_space(4.0);
@@ -1731,7 +1592,7 @@ fn render_right_bar(
                                             )
                                         ));
                                         ui.add_space(4.0);
-                                        
+
                                         left_row(ui, format!("Groups: {}", exp_snapshot.groups));
                                         ui.add_space(4.0);
                                         left_row(ui, format!("Conditions: {}", exp_snapshot.conditions));
@@ -1743,9 +1604,6 @@ fn render_right_bar(
                                         left_row(ui, format!("Topic: {}", exp_snapshot.topic));
                                         ui.add_space(4.0);
                                         left_row(ui, format!("Question: {}", exp_snapshot.question));
-
-
-
                                     });
                             },
                         );
@@ -1768,79 +1626,63 @@ fn render_right_bar(
                                         ui.set_min_height(columns_height);
                                         ui.set_height(columns_height);
 
-                                        
-
                                         ui.horizontal(|ui| {
                                             ui.label("Name:");
-                                            if let Ok(mut design) = exp_design.lock() {
-                                                let response = ui.add(
-                                                    egui::TextEdit::singleline(&mut design.name)
-                                                        .desired_width(140.0),
-                                                );
-                                                if response.changed() {
-                                                    design.sync_csv_name_from_name();
-                                                }
+                                            let response = ui.add(
+                                                egui::TextEdit::singleline(&mut state.exp_design.name)
+                                                    .desired_width(140.0),
+                                            );
+                                            if response.changed() {
+                                                state.exp_design.sync_csv_name_from_name();
                                             }
                                         });
 
                                         ui.add_space(4.0);
-                                        
+
                                         ui.horizontal(|ui| {
                                             ui.label("Groups:");
-                                            if let Ok(mut design) = exp_design.lock() {
-                                                ui.add(
-                                                    egui::DragValue::new(&mut design.groups)
-                                                        .range(1..=32)
-                                                        .speed(0.05),
-                                                );
-                                            }
+                                            ui.add(
+                                                egui::DragValue::new(&mut state.exp_design.groups)
+                                                    .range(1..=32)
+                                                    .speed(0.05),
+                                            );
                                         });
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
                                             ui.label("Conditions:");
-                                            if let Ok(mut design) = exp_design.lock() {
-                                                ui.add(
-                                                    egui::DragValue::new(&mut design.conditions)
-                                                        .range(1..=humai_core::experiment::MAX_CONDITIONS as u32)
-                                                        .speed(0.05),
-                                                )
-                                                .on_hover_text(
-                                                    "Humai currently supports up to 2 named conditions \
-                                                     (Cooperative and Argumentative), each with its own \
-                                                     system prompt. 1 condition runs Cooperative only, no \
-                                                     counterbalancing.",
-                                                );
-                                            }
+                                            ui.add(
+                                                egui::DragValue::new(&mut state.exp_design.conditions)
+                                                    .range(1..=humai_core::experiment::MAX_CONDITIONS as u32)
+                                                    .speed(0.05),
+                                            )
+                                            .on_hover_text(
+                                                "Humai currently supports up to 2 named conditions \
+                                                 (Cooperative and Argumentative), each with its own \
+                                                 system prompt. 1 condition runs Cooperative only, no \
+                                                 counterbalancing.",
+                                            );
                                         });
-
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
                                             ui.label("Trials per condition:");
-                                            if let Ok(mut design) = exp_design.lock() {
-                                                ui.add(
-                                                    egui::DragValue::new(&mut design.trials)
-                                                        .range(1..=32)
-                                                        .speed(0.05),
-                                                );
-                                            }
+                                            ui.add(
+                                                egui::DragValue::new(&mut state.exp_design.trials)
+                                                    .range(1..=32)
+                                                    .speed(0.05),
+                                            );
                                         });
-
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
                                             ui.label("Seconds:");
-                                            if let Ok(mut design) = exp_design.lock() {
-                                                ui.add(
-                                                    egui::DragValue::new(&mut design.trial_seconds)
-                                                        .range(1..=3600)
-                                                        .speed(1.0),
-                                                );
-                                            }
+                                            ui.add(
+                                                egui::DragValue::new(&mut state.exp_design.trial_seconds)
+                                                    .range(1..=3600)
+                                                    .speed(1.0),
+                                            );
                                         });
-
-                                        
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
@@ -1849,12 +1691,10 @@ fn render_right_bar(
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            if let Ok(mut design) = exp_design.lock() {
-                                                ui.add(
-                                                    egui::TextEdit::singleline(&mut design.topic)
-                                                        .desired_width((middle_width - 24.0).max(120.0)),
-                                                );
-                                            }
+                                            ui.add(
+                                                egui::TextEdit::singleline(&mut state.exp_design.topic)
+                                                    .desired_width((middle_width - 24.0).max(120.0)),
+                                            );
                                         });
 
                                         ui.add_space(4.0);
@@ -1864,20 +1704,17 @@ fn render_right_bar(
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            if let Ok(mut design) = exp_design.lock() {
-                                                ui.add(
-                                                    egui::TextEdit::singleline(&mut design.question)
-                                                        .hint_text("Type final question")
-                                                        .desired_width((middle_width - 24.0).max(120.0)),
-                                                );
-                                            }
+                                            ui.add(
+                                                egui::TextEdit::singleline(&mut state.exp_design.question)
+                                                    .hint_text("Type final question")
+                                                    .desired_width((middle_width - 24.0).max(120.0)),
+                                            );
                                         });
 
                                         ui.add_space(8.0);
                                         ui.separator();
                                         ui.add_space(8.0);
 
-                                        
                                         ui.label(
                                             egui::RichText::new(format!(
                                                 "groups={} | conditions={} | trials={} | seconds={}",
@@ -1889,14 +1726,13 @@ fn render_right_bar(
                                             .small()
                                             .weak(),
                                         );
-                                        
+
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
                                             if ui.button("Submit").clicked() {
-                                                open_participant_id_modal();
+                                                open_participant_id_modal(state);
                                             }
                                         });
-                                        
                                     });
                             },
                         );
@@ -1948,53 +1784,30 @@ fn render_right_bar(
                         );
                     },
                 );
-                
             });
         });
 }
 
-fn open_participant_id_modal() {
-    let participant_id = HUMAI_EXPDESIGN
-        .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
-        .lock()
-        .map(|design| design.participant_id.clone())
-        .unwrap_or_default();
-
-    if let Ok(mut modal) = GLOBAL_INPUT_MODAL
-        .get_or_init(|| Mutex::new(InputModalState::default()))
-        .lock()
-    {
-        modal.open = true;
-        modal.title = "Participant ID".to_string();
-        modal.label = "Participant ID".to_string();
-        modal.hint = "Type participant ID".to_string();
-        modal.confirm_label = "OK".to_string();
-        modal.input = participant_id;
-        modal.action = Some(ModalAction::SetParticipantId);
-    }
+fn open_participant_id_modal(state: &mut OverviewChatUiState) {
+    state.input_modal.open = true;
+    state.input_modal.title = "Participant ID".to_string();
+    state.input_modal.label = "Participant ID".to_string();
+    state.input_modal.hint = "Type participant ID".to_string();
+    state.input_modal.confirm_label = "OK".to_string();
+    state.input_modal.input = state.exp_design.participant_id.clone();
+    state.input_modal.action = Some(ModalAction::SetParticipantId);
 }
 
-fn render_participant_id_modal(ctx: &egui::Context) {
-    let (mut is_open, title, label, hint, confirm_label) = {
-        let modal_guard = GLOBAL_INPUT_MODAL
-            .get_or_init(|| Mutex::new(InputModalState::default()))
-            .lock();
-        let Ok(modal) = modal_guard else {
-            return;
-        };
-
-        (
-            modal.open,
-            modal.title.clone(),
-            modal.label.clone(),
-            modal.hint.clone(),
-            modal.confirm_label.clone(),
-        )
-    };
-
-    if !is_open {
+fn render_participant_id_modal(ctx: &egui::Context, state: &mut OverviewChatUiState) {
+    if !state.input_modal.open {
         return;
     }
+
+    let title = state.input_modal.title.clone();
+    let label = state.input_modal.label.clone();
+    let hint = state.input_modal.hint.clone();
+    let confirm_label = state.input_modal.confirm_label.clone();
+    let mut is_open = true;
 
     let rect = ctx.content_rect();
     let modal_size = egui::vec2((rect.width() * 0.6).max(320.0), (rect.height() * 0.6).max(220.0));
@@ -2013,39 +1826,29 @@ fn render_participant_id_modal(ctx: &egui::Context) {
                 ui.label(label.clone());
                 ui.add_space(8.0);
 
-                if let Ok(mut modal) = GLOBAL_INPUT_MODAL
-                    .get_or_init(|| Mutex::new(InputModalState::default()))
-                    .lock()
-                {
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut modal.input)
-                            .hint_text(hint.clone())
-                            .desired_width((modal_size.x * 0.6).max(220.0)),
-                    );
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut state.input_modal.input)
+                        .hint_text(hint.clone())
+                        .desired_width((modal_size.x * 0.6).max(220.0)),
+                );
 
-                    ui.add_space(16.0);
-                    let ok_clicked = ui.button(confirm_label.clone()).clicked()
-                        || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                ui.add_space(16.0);
+                let ok_clicked = ui.button(confirm_label.clone()).clicked()
+                    || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
 
-                    if ok_clicked {
-                        let value = modal.input.trim().to_string();
-                        match modal.action.clone() {
-                            Some(ModalAction::SetParticipantId) => {
-                                if let Ok(mut design) = HUMAI_EXPDESIGN
-                                    .get_or_init(|| Mutex::new(HumaiExpDesign::default()))
-                                    .lock()
-                                {
-                                    design.participant_id = value;
-                                    record_experiment_configured(design_snapshot(&design));
-                                }
-                                mark_experiment_configured();
-                            }
-                            None => {}
+                if ok_clicked {
+                    let value = state.input_modal.input.trim().to_string();
+                    match state.input_modal.action.clone() {
+                        Some(ModalAction::SetParticipantId) => {
+                            state.exp_design.participant_id = value;
+                            record_experiment_configured(design_snapshot(&state.exp_design));
+                            state.session.configured = true;
                         }
-                        modal.open = false;
-                        modal.action = None;
-                        close_modal = true;
+                        None => {}
                     }
+                    state.input_modal.open = false;
+                    state.input_modal.action = None;
+                    close_modal = true;
                 }
             });
         });
@@ -2054,13 +1857,8 @@ fn render_participant_id_modal(ctx: &egui::Context) {
         is_open = false;
     }
 
-    if let Ok(mut modal) = GLOBAL_INPUT_MODAL
-        .get_or_init(|| Mutex::new(InputModalState::default()))
-        .lock()
-    {
-        modal.open = is_open;
-        if !is_open {
-            modal.action = None;
-        }
+    state.input_modal.open = is_open;
+    if !is_open {
+        state.input_modal.action = None;
     }
 }

@@ -1,7 +1,7 @@
 [package]
 name = "humai"
-description = "humai software"
-version = "0.1.3"
+description = "Humai desktop app: egui/eframe UI over humai-core, with an embedded local web dashboard."
+version = "0.1.4"
 edition = "2024"
 rust-version = "1.85"
 license = "GPL-3.0-or-later"
