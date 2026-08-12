@@ -59,8 +59,8 @@ crates/humai-core/                 # library crate — zero egui/eframe dependen
     sync_ext.rs                                # MutexExt/RwLockExt poison-recovering lock
                                        #   accessors — used by all three crates, see Locking below
     timer.rs                                    # trial countdown timer used by the experiment UI
-    vault.rs                                     # master-password gate (Argon2id) + encrypted
-                                       #   Vault blob — no egui/UI dependency (rendering lives in
+    vault.rs                                     # master-password gate (Argon2id) — no
+                                       #   egui/UI dependency (rendering lives in
                                        #   apps/humai/src/ui/vault_panel.rs; keep it that way)
 crates/humai-web/                  # library crate — local read-only browser dashboard
   Cargo.toml                        # depends on humai-core only, not apps/humai
@@ -157,15 +157,15 @@ nothing needs staging into `dist/` for the dashboard to work in a distributed bu
   `OllamaProvider` maps it onto Ollama's `num_predict`. As of this writing exactly
   one provider exists (Ollama) — this guidance is for when that changes, not a
   hint that more should be added speculatively now.
-- **Known state-management debt** (documented in ARCHITECTURE.md's "Known
-  Limitations", not something to extend): `apps/humai/src/ui/overview_chat/panel.rs`
-  and `chat.rs` still hold experiment/chat UI state (current trial, chat rooms,
-  participant ID, modal open/closed flags) in process-global `OnceLock<Mutex<T>>`
-  statics rather than as fields on `Humai`/`HumaiApp`. This predates the
-  `humai-core` split and hasn't been fixed yet — don't copy the pattern into new
-  code. New per-app UI state should be a field on `Humai` (`app_model.rs`) or a
-  small nested struct held on `HumaiApp` (see `HumaiUiState`/`OllamaUiState` in
-  `ui/mod.rs` for the pattern actually worth following), threaded through render
+- **State-management pattern**: `apps/humai/src/ui/overview_chat/panel.rs` and
+  `chat.rs` hold experiment/chat UI state (current trial, chat rooms, participant
+  ID, modal open/closed flags) on `OverviewChatUiState`, a field of `HumaiUiState`
+  owned by `HumaiApp`, threaded through render calls explicitly — this used to be
+  process-global `OnceLock<Mutex<T>>` statics (predating the `humai-core` split);
+  don't reintroduce that pattern. New per-app UI state should be a field on `Humai`
+  (`app_model.rs`) or a small nested struct held on `HumaiApp` (see
+  `HumaiUiState`/`OllamaUiState`/`OverviewChatUiState` in `ui/mod.rs` /
+  `overview_chat/panel.rs` for the pattern to follow), threaded through render
   calls explicitly. The one `OnceLock`-based cache that *is* the right pattern is a
   genuine cross-cutting singleton keyed by something other than "the app started":
   `ollama::engine::InferenceEngine::from_host`'s per-host connection-pool cache, and
@@ -314,11 +314,11 @@ first launch — this is expected, not a bug).
   or `HUMAI_SKIP_VAULT=1` to force-skip even if the lock env var is set).
 - The hash lives at `vault/.master_hash` (relative to CWD) or can be supplied via
   `HUMAI_MASTER_HASH`. This file is gitignored — never commit a real hash.
-- KDF tuning (`HUMAI_ARGON2_M_KIB`, `HUMAI_ARGON2_T`, `HUMAI_ARGON2_P`) and the
-  ChaCha20-Poly1305 vault blob logic are in `crates/humai-core/src/vault.rs`; see the
-  module doc comment at the top of that file for the full env-var list.
+- KDF tuning (`HUMAI_ARGON2_M_KIB`, `HUMAI_ARGON2_T`, `HUMAI_ARGON2_P`) is in
+  `crates/humai-core/src/vault.rs`; see the module doc comment at the top of that
+  file for the full env-var list.
 - `vault.rs` must not depend on `egui`/`eframe` — it lives in `humai-core` specifically
-  so it can't. It's crypto and state (`MasterVault`, `Vault`, KDF params); rendering
+  so it can't. It's crypto and state (`MasterVault`, KDF params); rendering
   lives in `apps/humai/src/ui/vault_panel.rs`, which talks to it only through `pub`
   accessors (`is_skip_vault`, `needs_password_setup`, `status`, `master_input_mut`,
   `confirm_input_mut`, `try_unlock`, `try_setup_password`). If you need the UI to
@@ -459,5 +459,5 @@ to the tag's GitHub Release.
   `vault/.master_hash` are gitignored local/experiment artifacts — never add them to git.
 - Don't add a new process-global `OnceLock<Mutex<T>>` singleton for state that has a
   natural owner (`Humai`, `HumaiApp`, or a small nested state struct). See "`humai-core`
-  vs `apps/humai`: where new code goes" above — `panel.rs`/`chat.rs`'s existing statics
-  are known debt being paid down, not a pattern to extend.
+  vs `apps/humai`: where new code goes" above — `panel.rs`/`chat.rs` used to do this;
+  it's fixed now (see `OverviewChatUiState`), don't reintroduce the pattern.

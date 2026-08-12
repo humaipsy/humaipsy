@@ -100,8 +100,7 @@ crates/humai-core/          Library crate — zero egui/eframe dependency
                               accessors, used by all three crates
     timer.rs                                Process-global trial countdown timer
                               (start/pause/reset)
-    vault.rs                                 Master-password gate (Argon2id) +
-                              encrypted Vault blob (ChaCha20-Poly1305)
+    vault.rs                                 Master-password gate (Argon2id)
 
 crates/humai-web/            Library crate — local read-only browser dashboard.
   Cargo.toml                  Depends on humai-core only (not apps/humai) — same
@@ -145,11 +144,13 @@ apps/humai/                  UI binary — depends on humai-core and humai-web a
                               its math to humai_core::experiment), condition/timeout handling,
                               CSV export shortcut, chat room UI, participant-ID modal, the
                               egui_tiles OverviewPane/Behavior for the sidebar/chat split.
-                              State is still held in process-global OnceLock<Mutex<T>>
-                              statics here — see Known Limitations.
+                              Orchestration state (OverviewChatUiState: current trial, chat
+                              rooms, participant ID, modal state) is a field on HumaiUiState,
+                              threaded through render calls explicitly — not process-global.
         chat.rs                                       ChatExample: in-memory chat/room
                               rendering state (sidebar_ui, room management), UiInbox-based
-                              background-to-UI message channel
+                              background-to-UI message channel; owns the rename-room modal's
+                              state directly as a field
   bin/
     gen_master_hash.rs               Standalone binary: interactively writes
                               vault/.master_hash, depends only on humai_core::vault
@@ -180,8 +181,9 @@ emitting `TrialStart`/`Transcript`/`TrialEnd`/`TrialTotal` rows via
 `recording::experiment_csv` — but delegates every piece of counterbalancing/
 condition-assignment math to `humai_core::experiment` rather than reimplementing it.
 This orchestration state (current trial index, timeout popup, participant ID, chat
-room list) is still held in process-global statics in `panel.rs`, not owned by
-`Humai`/`HumaiApp` — see [Known Limitations](#known-limitations).
+room list) lives on `OverviewChatUiState`, a field of `HumaiUiState` owned by
+`HumaiApp` and threaded through render calls explicitly — not process-global state,
+so it's scoped to one `HumaiApp` instance rather than the whole process.
 
 After the last trial the participant is prompted for a free-text final answer, the
 experiment is marked complete, and the operator can copy the just-written CSV to the
@@ -262,8 +264,7 @@ creation time (no-op on Windows, where per-user profile ACLs already isolate the
 - **Master-password gate**: Argon2id-hashed password required to unlock the app in
   release builds (`vault.rs`), with exponential backoff on repeated failures. Debug
   builds skip this by default for faster iteration (`HUMAI_ENABLE_PASSWORD_LOCK=1` to
-  opt in). A `Vault` container (ChaCha20-Poly1305, HKDF-derived key) exists for future
-  encrypted-payload storage but has no current caller beyond its own round-trip test.
+  opt in).
 - **Air-gap mode** (`HUMAI_AIR_GAP=1`): blocks all outbound HTTP by default; a second
   flag (`HUMAI_ALLOW_LOCAL_OLLAMA`) can still permit loopback-only Ollama traffic.
   Enforced centrally in `ollama::guard_ollama_request`, checked before every request.
@@ -342,16 +343,6 @@ loopback-only bind is the actual barrier once the app is unlocked).
 Honest gaps as of this writing — not hidden, so the next change to touch this code
 knows what it's standing on:
 
-- **`panel.rs`/`chat.rs` still hold experiment/chat UI state in process-global
-  `OnceLock<Mutex<T>>` statics** (current trial, chat rooms, participant ID, modal
-  state) rather than as fields on `Humai`/`HumaiApp`. This means the app can only
-  ever have one experiment session per process, and that state can't be unit tested
-  in isolation the way `humai_core::experiment`'s pure math now can. The trial-
-  sequencing *logic* itself has been extracted and is well-tested (see "Experiment
-  engine" above); only the *orchestration* layer around it is still global-state-based.
-  Removing this is real, scoped follow-up work — not attempted in the same pass as
-  the correctness fixes above because it touches ~2,000 lines of deeply-nested egui
-  closures and deserves its own careful, independently-reviewable change.
 - **Humai only supports two named conditions** (Cooperative/Argumentative), each with
   a single env-var-configured prompt. The Design tab's "Conditions" control is
   honestly clamped to this rather than silently ignored, but a researcher wanting a
@@ -377,23 +368,20 @@ knows what it's standing on:
 
 Rough priority order, highest-value first:
 
-1. De-globalize `panel.rs`/`chat.rs`'s remaining `OnceLock<Mutex<T>>` state (see
-   Known Limitations) — the single biggest remaining architectural debt, and what
-   would let the web dashboard grow beyond read-only without reaching into private
-   UI-module statics.
-2. A headless experiment runner (`humai-core` + a small CLI) for scripted/CI-driven
+1. A headless experiment runner (`humai-core` + a small CLI) for scripted/CI-driven
    regression testing of prompts and trial logic without a GUI.
-3. Generalize `humai_core::experiment` beyond exactly two named conditions to an
+2. Generalize `humai_core::experiment` beyond exactly two named conditions to an
    arbitrary researcher-authored set, with a matching Design-tab UI for entering each
    condition's prompt — turning "Conditions: N" from a clamped, honest control into a
    fully general one.
-4. Push updates for the web dashboard (SSE/WebSocket) instead of polling, and/or
-   write endpoints (send a message, advance a trial) once #1 makes that state
-   reachable from outside `panel.rs` — currently blocked on that, not on `humai-web`
-   itself.
-5. A real hostname/TLS story for the dashboard (`https://humai.local` via mDNS, or a
+3. Push updates for the web dashboard (SSE/WebSocket) instead of polling, and/or
+   write endpoints (send a message, advance a trial) — `OverviewChatUiState` being a
+   real, addressable field (rather than private statics inside `panel.rs`) removes
+   the structural blocker this used to have; this is now an `humai-web`-side scoping
+   question, not something waiting on `apps/humai` first.
+4. A real hostname/TLS story for the dashboard (`https://humai.local` via mDNS, or a
    self-signed localhost cert) if plain `http://localhost:8787` stops being enough.
-6. An Intel (`x86_64-apple-darwin`) macOS release build, or a `lipo`-merged universal
+5. An Intel (`x86_64-apple-darwin`) macOS release build, or a `lipo`-merged universal
    binary, if Intel Mac users are a real audience.
 
 ## Build & release

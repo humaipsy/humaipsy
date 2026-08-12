@@ -40,6 +40,10 @@ pub(crate) struct HumaiUiState {
 	/// rendered, then built once and persisted here (it holds the user's
 	/// drag-to-resize position) — see `overview_chat::panel::build_overview_tiles_tree`.
 	pub(crate) overview_tiles: Option<egui_tiles::Tree<overview_chat::panel::OverviewPane>>,
+	/// Experiment/chat orchestration state for the Overview and Design tabs
+	/// (current trial, chat rooms, participant ID, modal state). Owned here
+	/// instead of process-global statics — see `overview_chat::panel::OverviewChatUiState`.
+	pub(crate) overview_chat: overview_chat::panel::OverviewChatUiState,
 }
 
 /// Bundled so emoji in Ollama responses render identically on Windows and Linux,
