@@ -36,10 +36,6 @@ impl Default for OllamaUiState {
 #[derive(Default)]
 pub(crate) struct HumaiUiState {
 	pub(crate) ollama: OllamaUiState,
-	/// Resizable sidebar/chat layout for the Overview tab. `None` until first
-	/// rendered, then built once and persisted here (it holds the user's
-	/// drag-to-resize position) — see `overview_chat::panel::build_overview_tiles_tree`.
-	pub(crate) overview_tiles: Option<egui_tiles::Tree<overview_chat::panel::OverviewPane>>,
 	/// Experiment/chat orchestration state for the Overview and Design tabs
 	/// (current trial, chat rooms, participant ID, modal state). Owned here
 	/// instead of process-global statics — see `overview_chat::panel::OverviewChatUiState`.
@@ -170,17 +166,13 @@ impl eframe::App for HumaiApp {
 			return;
 		}
 
-		egui::TopBottomPanel::top("master_vault_lock_bar").show(ctx, |ui| {
-			if vault_panel::show_lock_bar(ui) {
-				self.vault.lock();
-			}
-		});
-
 		refresh_ollama_models_on_startup(&self.humai, &mut self.ui_state, ctx);
 		egui::CentralPanel::default().show(ctx, |ui| {
 			ui.vertical(|ui| {
 				ui.set_min_height(ui.available_height());
-				self.humai.render_main_panel(ui, &mut self.ui_state);
+				if self.humai.render_main_panel(ui, &mut self.ui_state) {
+					self.vault.lock();
+				}
 			});
 		});
 	}

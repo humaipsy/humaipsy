@@ -884,61 +884,6 @@ impl Default for InputModalState {
     }
 }
 
-/// The Overview tab's two resizable panels. Replaces a previously hardcoded
-/// 140px-wide sidebar split — the divider is now user-draggable via
-/// `egui_tiles`, and the `Tree` (which is what remembers the drag position)
-/// is persisted on `HumaiUiState`, not rebuilt every frame.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum OverviewPane {
-    Sidebar,
-    Chat,
-}
-
-pub(crate) fn build_overview_tiles_tree() -> egui_tiles::Tree<OverviewPane> {
-    let mut tiles = egui_tiles::Tiles::default();
-    let sidebar = tiles.insert_pane(OverviewPane::Sidebar);
-    let chat = tiles.insert_pane(OverviewPane::Chat);
-    let root = tiles.insert_horizontal_tile(vec![sidebar, chat]);
-    egui_tiles::Tree::new("overview_tiles", root, tiles)
-}
-
-/// Dispatches each pane to the existing rendering functions unchanged — this
-/// is a resizable-container swap, not a rewrite of what's rendered inside.
-struct OverviewPanesBehavior<'a> {
-    app: &'a mut Humai,
-    store: &'a Store,
-    state: &'a mut OverviewChatUiState,
-    human_to_agent_mode: bool,
-}
-
-impl egui_tiles::Behavior<OverviewPane> for OverviewPanesBehavior<'_> {
-    fn tab_title_for_pane(&mut self, pane: &OverviewPane) -> egui::WidgetText {
-        match pane {
-            OverviewPane::Sidebar => "Rooms".into(),
-            OverviewPane::Chat => "Chat".into(),
-        }
-    }
-
-    fn pane_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        _tile_id: egui_tiles::TileId,
-        pane: &mut OverviewPane,
-    ) -> egui_tiles::UiResponse {
-        match pane {
-            OverviewPane::Sidebar => {
-                self.state
-                    .chat
-                    .sidebar_ui(ui, self.store, &self.state.exp_design.participant_id);
-            }
-            OverviewPane::Chat => {
-                render_chat_columns(self.app, ui, self.store, self.state, self.human_to_agent_mode);
-            }
-        }
-        egui_tiles::UiResponse::None
-    }
-}
-
 pub(crate) fn render_overview_panel(
     app: &mut Humai,
     ui: &mut egui::Ui,
@@ -1065,16 +1010,43 @@ pub(crate) fn render_overview_panel(
         .show(ui, |ui| {
             ui.set_min_height(split_height);
             ui.set_height(split_height);
-            let tree = ui_state
-                .overview_tiles
-                .get_or_insert_with(build_overview_tiles_tree);
-            let mut behavior = OverviewPanesBehavior {
-                app,
-                store: &store,
-                state: &mut ui_state.overview_chat,
-                human_to_agent_mode,
-            };
-            tree.ui(&mut behavior, ui);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                let left_rect_width = 200.0;
+                let row_height = ui.available_height();
+                let right_rect_width =
+                    (ui.available_width() - left_rect_width - ui.spacing().item_spacing.x)
+                        .max(0.0);
+
+                ui.allocate_ui_with_layout(
+                    egui::vec2(left_rect_width, row_height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        egui::Frame::default()
+                            .stroke(egui::Stroke::new(
+                                1.0_f32,
+                                ui.visuals().widgets.noninteractive.bg_stroke.color,
+                            ))
+                            .inner_margin(egui::Margin::same(0))
+                            .show(ui, |ui| {
+                                ui.set_min_height(row_height);
+                                ui.set_height(row_height);
+                                state
+                                    .chat
+                                    .sidebar_ui(ui, &store, &state.exp_design.participant_id);
+                            });
+                    },
+                );
+
+                ui.allocate_ui_with_layout(
+                    egui::vec2(right_rect_width, row_height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_min_height(row_height);
+                        ui.set_height(row_height);
+                        render_chat_columns(app, ui, &store, state, human_to_agent_mode);
+                    },
+                );
+            });
         });
 }
 
