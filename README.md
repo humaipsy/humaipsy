@@ -154,11 +154,25 @@ cargo clippy --all-targets -- -D warnings
 
 </details>
 
-## Citations
+
+## Citation
+
+<details>
+<summary>Latex</summary>
+<br>
 
 ```latex
-sf
+@inproceedings{sutskova2026humai,
+  author       = {Sutskova, Olga and Arandas, Lu{\'i}s},
+  title        = {Developing a {GDPR} Compliant Locally Deployable Experimentation Toolkit for Human to {AI}-Agent Interaction Testing},
+  booktitle    = {Cyberpsychology Section Annual Conference},
+  organization = {The British Psychological Association (BPS)},
+  address      = {York St John University},
+  year         = {2026}
+}
 ```
+
+</details>
 
 ## License
 
