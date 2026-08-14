@@ -18,6 +18,7 @@
 
 [![Website](https://img.shields.io/badge/Website-vecnode.github.io%2Fhumai-blue)](https://vecnode.github.io/humai/)
 
+
 Features:
 
 - Cross-platform desktop application (Windows, Linux, macOS) for Human-AI Interaction research
@@ -173,6 +174,9 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 </details>
+
+[![OSF](https://img.shields.io/badge/OSF-osf.io%2F85vgm-blue)](https://osf.io/85vgm/overview)
+
 
 ## License
 
