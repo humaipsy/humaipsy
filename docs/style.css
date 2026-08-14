@@ -176,7 +176,8 @@
     text-transform: uppercase;
     color: var(--ink-soft);
   }
-  .condition-row { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; align-items: flex-start; }
+  .condition-row { display: flex; flex-direction: row; gap: 18px; margin-top: 12px; align-items: flex-start; }
+  .condition-col { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
   .condition-chip {
     font-family: var(--font-mono);
     font-size: 11px;
