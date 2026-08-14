@@ -24,7 +24,7 @@ For a narrative walkthrough of how these modules fit together — process model,
 experiment engine's trial/condition logic, storage formats, security model, known
 limitations, and the roadmap — see [ARCHITECTURE.md](ARCHITECTURE.md). For what's
 actually protected (and what isn't) about experiment data — network boundaries, the
-vault, file permissions, what's plaintext at rest — see [PRIVACY.md](PRIVACY.md).
+vault, file permissions, what's plaintext at rest — see [SECURITY.md](SECURITY.md).
 Any change that touches the vault, air-gap policy, the web dashboard's gating, or
 file permissions should keep that document accurate; it's read by people deciding
 whether this tool is safe to use with real participant data.
@@ -431,7 +431,7 @@ first launch — this is expected, not a bug).
   content when `false`. If you add a new route that reads any experiment data, check
   this flag the same way — don't assume the loopback bind alone is enough, since
   "locked" is a real state a user actively puts the app into and expects respected.
-  See [PRIVACY.md](PRIVACY.md) for the full reasoning.
+  See [SECURITY.md](SECURITY.md) for the full reasoning.
 
 ## Release process
 

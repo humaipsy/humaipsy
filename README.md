@@ -7,11 +7,11 @@
 Features:
 
 - Cross-platform desktop application (Windows, Linux, macOS) for Human-AI Interaction research
-- Runs a two-condition (Cooperative / Argumentative), counterbalanced chat experiment against a local or remote [Ollama](https://ollama.com) model, with a researcher-configurable number of trials per condition
-- Local and offline-first: no telemetry, no required network dependency beyond the Ollama host you point it at. An optional local read-only web dashboard (loopback-only by default) can be viewed in a browser while the app is running.
+- Runs a multi-condition (e.g., Cooperative / Argumentative), counterbalanced chat experiment against a local or remote [Ollama](https://ollama.com) model, with a researcher-configurable number of trials per condition
+- Local and offline-first: no telemetry, no required network dependency beyond the Ollama host you point it at. An optional local read-only web dashboard (loopback-only by default) can be viewed in a browser while the app is running
 - Every trial is recorded to CSV, a mirrored JSONL audit-trail ledger, and a local SQLite chat log
 
-For how the app is put together (process model, module layout, storage formats, known limitations, and what's planned next) see [ARCHITECTURE.md](ARCHITECTURE.md). For contributor rules (build/run/test commands, cross-platform gotchas, release process) see [AGENTS.md](AGENTS.md). For what's actually protected (and what isn't) if you're handling real participant data, see [PRIVACY.md](PRIVACY.md).
+For how the app is put together (process model, module layout, storage formats, known limitations, and what's planned next) see [ARCHITECTURE.md](ARCHITECTURE.md). For contributor rules (build/run/test commands, cross-platform gotchas, release process) see [AGENTS.md](AGENTS.md). For what's actually protected (and what isn't) if you're handling real participant data, see [SECURITY.md](SECURITY.md).
 
 The engine (agent prompting, the Ollama client, experiment recording, the chat store, the vault) lives in the `humai-core` library crate with no UI dependency; `apps/humai` is the `eframe`/`egui` desktop binary built on top of it.
 
@@ -141,8 +141,4 @@ cargo clippy --all-targets -- -D warnings
 
 Copyright (C) 2026 Luís Arandas and Olga Sutskova
 
-Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0) — see
-[LICENSE](LICENSE) for the full text. The AGPL extends the GPL's copyleft to network
-use: if you run a modified version of Humai as a hosted/SaaS service, you must make
-the corresponding source available to that service's users, not just to people you
-hand a binary to.
+Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0) — see [LICENSE](LICENSE) for the full text. 
