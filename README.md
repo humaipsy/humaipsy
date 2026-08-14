@@ -1,6 +1,6 @@
 # Humai
 
-[![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org) [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE) [![CI](https://github.com/vecnode/humai/actions/workflows/ci.yml/badge.svg)](https://github.com/vecnode/humai/actions/workflows/ci.yml) [![Website](https://img.shields.io/badge/Website-vecnode.github.io%2Fhumai-blue)](https://vecnode.github.io/humai/)
+[![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org) [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE) [![CI](https://github.com/vecnode/humai/actions/workflows/ci.yml/badge.svg)](https://github.com/vecnode/humai/actions/workflows/ci.yml) 
 
 🤖 Humai, application for running scientific Human-AI-agent Interaction experimentation for experimental psychology, cognitive sciences and HCI research. 
 
@@ -16,6 +16,8 @@
   </table>
 </p>
 
+[![Website](https://img.shields.io/badge/Website-vecnode.github.io%2Fhumai-blue)](https://vecnode.github.io/humai/)
+
 Features:
 
 - Cross-platform desktop application (Windows, Linux, macOS) for Human-AI Interaction research
@@ -28,7 +30,7 @@ For how the app is put together (process model, module layout, storage formats, 
 The engine (agent prompting, Ollama client, experiment recording, chat store, vault) lives in the `humai-core` library crate with no UI dependency; `apps/humai` is the `eframe`/`egui` desktop binary built on top of it. We also add a live viewer for a secondary screen.
 
 <p align="center">
-  <img src="./assets/live_view.png" alt="Humai live viewer" width="80%">
+  <img src="./assets/live_view.png" alt="Humai live viewer" width="60%">
 </p>
 
 ## Dependencies
@@ -152,6 +154,25 @@ cargo clippy --all-targets -- -D warnings
 
 </details>
 
+
+## Citation
+
+<details>
+<summary>Latex</summary>
+<br>
+
+```latex
+@inproceedings{sutskova2026humai,
+  author       = {Sutskova, Olga and Arandas, Lu{\'i}s},
+  title        = {Developing a {GDPR} Compliant Locally Deployable Experimentation Toolkit for Human to {AI}-Agent Interaction Testing},
+  booktitle    = {Cyberpsychology Section Annual Conference},
+  organization = {The British Psychological Association (BPS)},
+  address      = {York St John University},
+  year         = {2026}
+}
+```
+
+</details>
 
 ## License
 
