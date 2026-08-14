@@ -1,8 +1,12 @@
 # Humai
 
-[![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org) [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE) [![CI](https://github.com/vecnode/humai/actions/workflows/ci.yml/badge.svg)](https://github.com/vecnode/humai/actions/workflows/ci.yml)
+[![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org) [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE) [![CI](https://github.com/vecnode/humai/actions/workflows/ci.yml/badge.svg)](https://github.com/vecnode/humai/actions/workflows/ci.yml) [![Website](https://img.shields.io/website?url=https%3A%2F%2Fvecnode.github.io%2Fhumai%2F&label=website)](https://vecnode.github.io/humai/)
 
 🤖 Humai, application for running scientific Human-AI-agent Interaction experimentation for experimental psychology, cognitive sciences and HCI research. 
+
+<img src="./assets/panel_1.png" alt="Humai panel 1" width="80%">
+<img src="./assets/panel_2.png" alt="Humai panel 2" width="80%">
+<img src="./assets/panel_3.png" alt="Humai panel 3" width="80%">
 
 Features:
 
@@ -13,7 +17,9 @@ Features:
 
 For how the app is put together (process model, module layout, storage formats, known limitations, and what's planned next) see [ARCHITECTURE.md](ARCHITECTURE.md). For contributor rules (build/run/test commands, cross-platform gotchas, release process) see [AGENTS.md](AGENTS.md). For what's actually protected (and what isn't) if you're handling real participant data, see [SECURITY.md](SECURITY.md).
 
-The engine (agent prompting, the Ollama client, experiment recording, the chat store, the vault) lives in the `humai-core` library crate with no UI dependency; `apps/humai` is the `eframe`/`egui` desktop binary built on top of it.
+The engine (agent prompting, Ollama client, experiment recording, chat store, vault) lives in the `humai-core` library crate with no UI dependency; `apps/humai` is the `eframe`/`egui` desktop binary built on top of it. We also add a live viewer for a secondary screen.
+
+<img src="./assets/live_view.png" alt="Humai live viewer" width="80%">
 
 ## Dependencies
 
