@@ -4,9 +4,11 @@
 
 🤖 Humai, application for running scientific Human-AI-agent Interaction experimentation for experimental psychology, cognitive sciences and HCI research. 
 
-<img src="./assets/panel_1.png" alt="Humai panel 1" width="80%">
-<img src="./assets/panel_2.png" alt="Humai panel 2" width="80%">
-<img src="./assets/panel_3.png" alt="Humai panel 3" width="80%">
+<p align="center">
+  <img src="./assets/panel_1.png" alt="Humai panel 1" width="80%">
+  <img src="./assets/panel_2.png" alt="Humai panel 2" width="80%">
+  <img src="./assets/panel_3.png" alt="Humai panel 3" width="80%">
+</p>
 
 Features:
 
@@ -19,7 +21,9 @@ For how the app is put together (process model, module layout, storage formats, 
 
 The engine (agent prompting, Ollama client, experiment recording, chat store, vault) lives in the `humai-core` library crate with no UI dependency; `apps/humai` is the `eframe`/`egui` desktop binary built on top of it. We also add a live viewer for a secondary screen.
 
-<img src="./assets/live_view.png" alt="Humai live viewer" width="80%">
+<p align="center">
+  <img src="./assets/live_view.png" alt="Humai live viewer" width="80%">
+</p>
 
 ## Dependencies
 
