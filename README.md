@@ -1,6 +1,6 @@
 # Humai
 
-[![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org) [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE) [![CI](https://github.com/vecnode/humai/actions/workflows/ci.yml/badge.svg)](https://github.com/vecnode/humai/actions/workflows/ci.yml)
+[![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org) [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE) [![CI](https://github.com/vecnode/humai/actions/workflows/ci.yml/badge.svg)](https://github.com/vecnode/humai/actions/workflows/ci.yml)
 
 🤖 Humai, application for running scientific Human-AI-agent Interaction experimentation for experimental psychology, cognitive sciences and HCI research. 
 
@@ -141,5 +141,8 @@ cargo clippy --all-targets -- -D warnings
 
 Copyright (C) 2026 Luís Arandas and Olga Sutskova
 
-Licensed under the GNU General Public License v3.0 (or later) — see [LICENSE](LICENSE)
-for the full text.
+Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0) — see
+[LICENSE](LICENSE) for the full text. The AGPL extends the GPL's copyleft to network
+use: if you run a modified version of Humai as a hosted/SaaS service, you must make
+the corresponding source available to that service's users, not just to people you
+hand a binary to.
