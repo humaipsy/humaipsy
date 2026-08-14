@@ -5,7 +5,7 @@ data flow, storage formats, and the main runtime subsystems. For contributor-fac
 rules (cross-platform gotchas, build commands, things to leave alone), see
 [AGENTS.md](AGENTS.md). For the one-paragraph pitch, see [README.md](README.md). For
 what's actually protected — and what isn't — about experiment data, see
-[PRIVACY.md](PRIVACY.md).
+[SECURITY.md](SECURITY.md).
 
 ## Summary
 
@@ -334,7 +334,7 @@ blanked/empty responses while locked. Locking the desktop app (the Settings "Loc
 button) stops the dashboard from serving transcript content within one frame. This
 was a real gap during development — the dashboard initially had no relationship to
 the vault at all — caught and fixed before merge, not after. See
-[PRIVACY.md](PRIVACY.md) for the full security/privacy write-up, including what this
+[SECURITY.md](SECURITY.md) for the full security/privacy write-up, including what this
 gating does *not* protect against (the dashboard still has no auth of its own; the
 loopback-only bind is the actual barrier once the app is unlocked).
 
