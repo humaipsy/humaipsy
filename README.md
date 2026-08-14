@@ -1,6 +1,6 @@
 # Humai
 
-[![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org) [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE) [![CI](https://github.com/vecnode/humai/actions/workflows/ci.yml/badge.svg)](https://github.com/vecnode/humai/actions/workflows/ci.yml) [![Website](https://img.shields.io/website?url=https%3A%2F%2Fvecnode.github.io%2Fhumai%2F&label=website)](https://vecnode.github.io/humai/)
+[![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org) [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE) [![CI](https://github.com/vecnode/humai/actions/workflows/ci.yml/badge.svg)](https://github.com/vecnode/humai/actions/workflows/ci.yml) [![Website](https://img.shields.io/badge/Website-vecnode.github.io%2Fhumai-blue)](https://vecnode.github.io/humai/)
 
 🤖 Humai, application for running scientific Human-AI-agent Interaction experimentation for experimental psychology, cognitive sciences and HCI research. 
 
