@@ -5,9 +5,15 @@
 🤖 Humai, application for running scientific Human-AI-agent Interaction experimentation for experimental psychology, cognitive sciences and HCI research. 
 
 <p align="center">
-  <img src="./assets/panel_1.png" alt="Humai panel 1" width="80%">
-  <img src="./assets/panel_2.png" alt="Humai panel 2" width="80%">
-  <img src="./assets/panel_3.png" alt="Humai panel 3" width="80%">
+  <table width="80%">
+    <tr>
+      <td width="50%"><img src="./assets/panel_1.png" alt="Humai panel 1" width="100%"></td>
+      <td width="50%">
+        <img src="./assets/panel_2.png" alt="Humai panel 2" width="100%"><br>
+        <img src="./assets/panel_3.png" alt="Humai panel 3" width="100%">
+      </td>
+    </tr>
+  </table>
 </p>
 
 Features:
