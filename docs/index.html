@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Humai — Human-AI Interaction research instrument</title>
+<meta name="description" content="Humai is a cross-platform desktop application for running structured Human-AI Interaction experiments for cognitive science, HCI, and AI research.">
+<style>
+  :root {
+    --paper: #efeee7;
+    --surface: #f8f7f2;
+    --ink: #1c2521;
+    --ink-soft: #4b564f;
+    --line: rgba(28,37,33,.14);
+    --line-strong: rgba(28,37,33,.28);
+    --coop: #1f7a72;
+    --coop-soft: rgba(31,122,114,.10);
+    --argum: #b5652b;
+    --argum-soft: rgba(181,101,43,.10);
+    --shadow: 0 1px 0 rgba(28,37,33,.06);
+
+    --font-display: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+    --font-body: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #12161a;
+      --surface: #171c20;
+      --ink: #e7e4d8;
+      --ink-soft: #a7ada3;
+      --line: rgba(231,228,216,.14);
+      --line-strong: rgba(231,228,216,.28);
+      --coop: #4fc3b8;
+      --coop-soft: rgba(79,195,184,.12);
+      --argum: #e0954d;
+      --argum-soft: rgba(224,149,77,.12);
+      --shadow: 0 1px 0 rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #12161a;
+    --surface: #171c20;
+    --ink: #e7e4d8;
+    --ink-soft: #a7ada3;
+    --line: rgba(231,228,216,.14);
+    --line-strong: rgba(231,228,216,.28);
+    --coop: #4fc3b8;
+    --coop-soft: rgba(79,195,184,.12);
+    --argum: #e0954d;
+    --argum-soft: rgba(224,149,77,.12);
+    --shadow: 0 1px 0 rgba(0,0,0,.4);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--coop-soft); }
+  a { color: var(--coop); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--coop); outline-offset: 2px; }
+
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 28px; }
+  .prose { max-width: 700px; }
+
+  h1, h2, h3 { font-family: var(--font-display); font-weight: 400; text-wrap: balance; margin: 0; }
+  .eyebrow {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    display: block;
+    margin-bottom: 10px;
+  }
+  code, .mono { font-family: var(--font-mono); }
+
+  /* Masthead */
+  header.masthead {
+    border-bottom: 1px solid var(--line);
+  }
+  .masthead .wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 22px;
+    padding-bottom: 22px;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .wordmark {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .wordmark .mark {
+    font-family: var(--font-display);
+    font-size: 22px;
+    letter-spacing: .01em;
+  }
+  .wordmark .tag {
+    font-family: var(--font-body);
+    font-size: 13px;
+    color: var(--ink-soft);
+    letter-spacing: .01em;
+  }
+  nav.masthead-links {
+    display: flex;
+    gap: 22px;
+    font-family: var(--font-body);
+    font-size: 14px;
+  }
+  nav.masthead-links a { color: var(--ink-soft); }
+  nav.masthead-links a:hover { color: var(--ink); }
+
+  /* Hero */
+  .hero { padding: 64px 0 40px; }
+  .hero .eyebrow { color: var(--coop); }
+  .hero h1 {
+    font-size: clamp(34px, 5vw, 52px);
+    line-height: 1.12;
+    max-width: 15ch;
+  }
+  .hero p.lede {
+    max-width: 62ch;
+    font-size: 19px;
+    color: var(--ink-soft);
+    margin: 22px 0 0;
+  }
+  .hero .cta-row {
+    display: flex;
+    gap: 14px;
+    margin-top: 30px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 14px;
+    padding: 11px 18px;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    color: var(--ink);
+    text-decoration: none;
+    background: var(--surface);
+  }
+  .btn.primary {
+    background: var(--ink);
+    color: var(--paper);
+    border-color: var(--ink);
+  }
+  .btn:hover { border-color: var(--coop); color: var(--coop); }
+  .btn.primary:hover { color: var(--paper); border-color: var(--coop); background: var(--coop); }
+
+  /* Instrument panel */
+  .panel-band { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); margin-top: 48px; }
+  .panel {
+    padding: 34px 0 40px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0;
+  }
+  .panel-cell {
+    padding: 18px 24px;
+    border-left: 1px solid var(--line);
+  }
+  .panel-cell:first-child { border-left: none; }
+  .panel-cell .label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .condition-row { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; align-items: flex-start; }
+  .condition-chip {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 5px 10px;
+    border-radius: 3px;
+    letter-spacing: .03em;
+  }
+  .condition-chip.coop { background: var(--coop-soft); color: var(--coop); border: 1px solid var(--coop); }
+  .condition-chip.argum { background: var(--argum-soft); color: var(--argum); border: 1px solid var(--argum); }
+  .readout-value {
+    font-family: var(--font-mono);
+    font-size: 30px;
+    margin-top: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+  .trial-track { display: flex; gap: 4px; margin-top: 14px; }
+  .trial-dot { width: 16px; height: 6px; border-radius: 2px; background: var(--line-strong); }
+  .trial-dot.done.coop { background: var(--coop); }
+  .trial-dot.done.argum { background: var(--argum); }
+  .trial-dot.active { background: var(--ink); }
+
+  /* Sections */
+  section { padding: 64px 0; }
+  section + section { border-top: 1px solid var(--line); }
+  .section-head { margin-bottom: 34px; }
+  .section-head h2 { font-size: 30px; }
+  .section-head p { color: var(--ink-soft); max-width: 62ch; margin: 12px 0 0; }
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+  }
+  @media (max-width: 900px) {
+    .feature-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 600px) {
+    .feature-grid { grid-template-columns: 1fr; }
+  }
+  .feature {
+    background: var(--paper);
+    padding: 22px 22px 24px;
+  }
+  .feature .num {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+  .feature h3 { font-size: 18px; margin-top: 10px; font-family: var(--font-body); font-weight: 600; }
+  .feature p { color: var(--ink-soft); font-size: 15px; margin: 8px 0 0; }
+
+  .tracks {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+  }
+  .track { background: var(--paper); padding: 28px; }
+  .track .eyebrow.coop { color: var(--coop); }
+  .track .eyebrow.argum { color: var(--argum); }
+  .track h3 { font-size: 21px; font-family: var(--font-display); }
+  .track ul { padding-left: 18px; margin: 16px 0 0; color: var(--ink-soft); font-size: 15px; }
+  .track li + li { margin-top: 8px; }
+  .track li::marker { color: var(--ink-soft); }
+
+
+  .cta-final { text-align: left; }
+  .cta-final p { max-width: 62ch; color: var(--ink-soft); }
+  .contact-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 24px; }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 32px 0 48px;
+  }
+  footer .wrap {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+    flex-wrap: wrap;
+    font-family: var(--font-body);
+    font-size: 13.5px;
+    color: var(--ink-soft);
+  }
+  footer a { color: var(--ink-soft); }
+  footer a:hover { color: var(--coop); }
+  footer .license-line { max-width: 46ch; line-height: 1.6; }
+
+  @media (max-width: 720px) {
+    .tracks { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .trial-dot.active { animation: pulse 1.6s ease-in-out infinite; }
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <div class="wordmark">
+      <span class="mark">Humai</span>
+      <span class="tag">/ human-ai interaction, instrumented</span>
+    </div>
+    <nav class="masthead-links">
+      <a href="#features">Features</a>
+      <a href="#research">For researchers</a>
+      <a href="#architecture">Architecture</a>
+      <a href="https://github.com/vecnode/humai">Repository</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap prose">
+      <span class="eyebrow">Desktop application · Windows, Linux, macOS</span>
+      <h1>A research instrument for structured Human&#8209;AI interaction experiments.</h1>
+      <p class="lede">
+        Humai runs counterbalanced, multi-condition trials against a local or
+        remote AI model, and records every trial in formats built for
+        statistical analysis and research.
+      </p>
+      <div class="cta-row">
+        <a class="btn primary" href="https://github.com/vecnode/humai/releases">Download a release</a>
+        <a class="btn" href="https://github.com/vecnode/humai#readme">Read the docs</a>
+        <a class="btn" href="https://github.com/vecnode/humai">Source on GitHub</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="panel-band">
+    <div class="wrap panel">
+      <div class="panel-cell">
+        <span class="label">Conditions</span>
+        <div class="condition-row">
+          <span class="condition-chip coop">AGENT A</span>
+          <span class="condition-chip argum">AGENT B</span>
+        </div>
+      </div>
+      <div class="panel-cell">
+        <span class="label">Trial</span>
+        <div class="readout-value">04 / 12</div>
+        <div class="trial-track" aria-hidden="true">
+          <span class="trial-dot done coop"></span><span class="trial-dot done argum"></span>
+          <span class="trial-dot done coop"></span><span class="trial-dot active"></span>
+          <span class="trial-dot"></span><span class="trial-dot"></span>
+          <span class="trial-dot"></span><span class="trial-dot"></span>
+          <span class="trial-dot"></span><span class="trial-dot"></span>
+          <span class="trial-dot"></span><span class="trial-dot"></span>
+        </div>
+      </div>
+      <div class="panel-cell">
+        <span class="label">Recording</span>
+        <div class="readout-value" style="font-size:16px; margin-top:14px; line-height:1.9;">
+          csv · jsonl ledger · sqlite
+        </div>
+      </div>
+      <div class="panel-cell">
+        <span class="label">Network</span>
+        <div class="readout-value" style="font-size:16px; margin-top:14px; line-height:1.9;">
+          offline-first · air-gap opt-in
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">What it does</span>
+        <h2>Built for the experiment, not the demo.</h2>
+        <p>
+          Every part of Humai exists to serve a trial: run it, time it, record it,
+          and hand back data a statistics package can read.
+        </p>
+      </div>
+      <div class="feature-grid">
+        <div class="feature">
+          <span class="num">01</span>
+          <h3>Counterbalanced trial design</h3>
+          <p>A within-subject design, condition order counterbalanced by
+          participant ID, with a researcher-set number of trials per
+          condition.</p>
+        </div>
+        <div class="feature">
+          <span class="num">02</span>
+          <h3>Triple-recorded output</h3>
+          <p>Every trial lands in a per-experiment CSV, a mirrored JSONL audit
+          ledger with SHA-256 run hashes, and a full SQLite chat transcript.</p>
+        </div>
+        <div class="feature">
+          <span class="num">03</span>
+          <h3>Local and offline-first</h3>
+          <p>No telemetry, no account, no required network dependency beyond
+          the provider host you point it at, e.g., Ollama. Air-gap mode blocks
+          all outbound HTTP.</p>
+        </div>
+        <div class="feature">
+          <span class="num">04</span>
+          <h3>Read-only live dashboard</h3>
+          <p>An optional local web view of the running experiment — loopback-only
+          by default, gated by the same master-password vault as the desktop app.</p>
+        </div>
+        <div class="feature">
+          <span class="num">05</span>
+          <h3>Master-password vault</h3>
+          <p>Argon2id-hashed lock on the application with throttled retry
+          backoff.</p>
+        </div>
+        <div class="feature">
+          <span class="num">06</span>
+          <h3>Cross-platform releases</h3>
+          <p>Native builds for Windows, Linux, and Apple Silicon macOS — no
+          build step beyond <code>cargo</code>, no bundled runtime to install.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="research">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Two audiences, one instrument</span>
+        <h2>Read from your own field.</h2>
+      </div>
+      <div class="tracks">
+        <div class="track">
+          <span class="eyebrow argum">Cognitive science, HCI &amp; experimental psychology</span>
+          <h3>A proper within-subject protocol</h3>
+          <ul>
+            <li>Counterbalanced condition ordering built into the trial engine</li>
+            <li>Participant ID, per-trial timing, and a free-text final answer captured on a fixed schema</li>
+            <li>CSV output designed to drop straight into R, Python, SPSS, or JASP</li>
+            <li>A named privacy/security document written for IRB review</li>
+          </ul>
+        </div>
+        <div class="track">
+          <span class="eyebrow coop">AI &amp; ML researchers</span>
+          <h3>Reproducible model-behavior trials</h3>
+          <ul>
+            <li>Runs against a local model provider — Ollama is a great way to produce results</li>
+            <li>Per-turn timing capture, time-to-first-token and prompt/eval token counts</li>
+            <li>Air-gapped evaluation runs against a fully local model</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="architecture">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Under the hood</span>
+        <h2>A pure Rust backend, end to end.</h2>
+        <p>
+          The experiment engine, the desktop UI, and the local dashboard's
+          <code>axum</code> server all compile from one Rust codebase into a
+          single native binary — no separate backend process, no bundled
+          runtime, no interpreter. That same codebase targets Windows, Linux,
+          and macOS directly, so the same trial logic runs identically
+          wherever a study is conducted, with no build step beyond
+          <code>cargo</code>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta-final">
+    <div class="wrap prose">
+      <span class="eyebrow">Get involved</span>
+      <h2>Under continuous development.</h2>
+      <p>
+        The project is under continuous development. We welcome input from the
+        scientific and research community to improve the software — study
+        designs it doesn't fit yet, recording formats that don't match your
+        analysis pipeline, and anything the privacy write-up should be more
+        careful about. For technical support and collaborations on the project,
+        contact us.
+      </p>
+      <div class="contact-row">
+        <a class="btn primary" href="https://github.com/vecnode/humai/issues">Open an issue</a>
+        <a class="btn" href="https://github.com/vecnode/humai/discussions">Start a discussion</a>
+        <a class="btn" href="https://github.com/vecnode/humai">Funding</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="license-line">
+      Copyright &copy; 2026 Lu&iacute;s Arandas and Olga Sutskova.<br>
+      Licensed under the <a href="https://github.com/vecnode/humai/blob/main/LICENSE">GNU Affero General Public License v3.0 (AGPL-3.0)</a>.
+    </div>
+    <div>
+      <a href="https://github.com/vecnode/humai">github.com/vecnode/humai</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

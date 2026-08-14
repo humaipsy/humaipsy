@@ -4,7 +4,7 @@ description = "Humai desktop app: egui/eframe UI over humai-core, with an embedd
 version = "0.1.4"
 edition = "2024"
 rust-version = "1.85"
-license = "GPL-3.0-or-later"
+license = "AGPL-3.0-only"
 default-run = "humai"
 build = "build.rs"
 

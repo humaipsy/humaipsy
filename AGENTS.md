@@ -16,8 +16,8 @@ or remote [Ollama](https://ollama.com) server for model inference, and records
 experiment trials to CSV plus a mirrored JSONL event ledger plus a local SQLite chat
 log. There is no separate backend service and no build step beyond `cargo`.
 
-Licensed under GPL-3.0-or-later (see [LICENSE](LICENSE)); do not add a dependency
-whose license is incompatible with the GPL (e.g. code under a "no derivatives" or
+Licensed under AGPL-3.0-only (see [LICENSE](LICENSE)); do not add a dependency
+whose license is incompatible with the AGPL (e.g. code under a "no derivatives" or
 similarly restrictive license) without checking first.
 
 For a narrative walkthrough of how these modules fit together — process model, the
