@@ -64,14 +64,3 @@ pub(crate) fn show_unlock_ui(vault: &mut MasterVault, ui: &mut egui::Ui) {
 		ui.label(egui::RichText::new(vault.status()).weak());
 	}
 }
-
-/// Thin top strip with Lock; call from a `TopBottomPanel::top`. Returns true if user locked.
-pub(crate) fn show_lock_bar(ui: &mut egui::Ui) -> bool {
-	let mut clicked = false;
-	ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-		if ui.button("Lock").clicked() {
-			clicked = true;
-		}
-	});
-	clicked
-}

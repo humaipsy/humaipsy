@@ -4,7 +4,10 @@ use crate::app_model::{Humai, MainPanelTab};
 use crate::ui::HumaiUiState;
 
 impl Humai {
-    pub(crate) fn render_main_panel(&mut self, ui: &mut egui::Ui, ui_state: &mut HumaiUiState) {
+    /// Returns true if the user clicked "Lock" this frame — the vault itself
+    /// lives on `HumaiApp`, not `Humai`, so the caller (`ui/mod.rs`) is the one
+    /// that actually locks it.
+    pub(crate) fn render_main_panel(&mut self, ui: &mut egui::Ui, ui_state: &mut HumaiUiState) -> bool {
         let panel_border_color = ui.visuals().widgets.noninteractive.bg_stroke.color;
         let panel = egui::Frame::default()
             .fill(ui.visuals().panel_fill)
@@ -13,6 +16,7 @@ impl Humai {
             .inner_margin(egui::Margin::same(6));
 
         let panel_height = ui.available_height().max(120.0);
+        let mut lock_clicked = false;
 
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), panel_height),
@@ -60,6 +64,12 @@ impl Humai {
                                 "Policy is enforced at runtime: non-loopback HTTP is blocked and logged.",
                             );
                         }
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Lock").clicked() {
+                                lock_clicked = true;
+                            }
+                        });
                     });
                     ui.separator();
 
@@ -82,5 +92,7 @@ impl Humai {
                 });
             },
         );
+
+        lock_clicked
     }
 }
