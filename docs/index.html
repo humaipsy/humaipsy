@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Humai — Human-AI Interaction research instrument</title>
+<title>HumaiPsy — Human-AI Interaction research instrument</title>
 <meta name="description" content="Humai is a cross-platform desktop application for running structured Human-AI Interaction experiments for cognitive science, HCI, and AI research.">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -12,7 +12,7 @@
 <header class="masthead">
   <div class="wrap">
     <div class="wordmark">
-      <span class="mark">Humai</span>
+      <span class="mark">HumaiPsy</span>
       <span class="tag">/ human-ai interaction, instrumented</span>
     </div>
     <nav class="masthead-links">
@@ -30,7 +30,7 @@
       <span class="eyebrow">Desktop application · Windows, Linux, macOS</span>
       <h1>A research instrument for structured Human&#8209;AI interaction experiments.</h1>
       <p class="lede">
-        Humai runs counterbalanced, multi-condition trials against a local or
+        Humai runs multi-condition trials against a local or
         remote AI model, and records every trial in formats built for
         statistical analysis and research.
       </p>
@@ -43,6 +43,7 @@
 
   <div class="panel-band">
     <div class="wrap panel">
+      <!-- Some design -->
       <div class="panel-cell">
         <span class="label">Conditions</span>
         <div class="condition-row">
@@ -56,6 +57,7 @@
           </div>
         </div>
       </div>
+      <!-- Cool animation here -->
       <div class="panel-cell">
         <span class="label">Trial</span>
         <div class="readout-value">04 / 12</div>
@@ -87,38 +89,35 @@
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">What it does</span>
-        <h2>Built for the experiment, not the demo.</h2>
+        <h2>Built for research, not a demo.</h2>
         <p>
-          Every part of Humai exists to serve a trial: run it, time it, record it,
+          Every part of HumaiPsy exists to serve a trial: run it, time it, record it,
           and hand back data a statistics package can read.
         </p>
       </div>
       <div class="feature-grid">
         <div class="feature">
           <span class="num">01</span>
-          <h3>Counterbalanced trial design</h3>
-          <p>A within-subject design, condition order counterbalanced by
-          participant ID, with a researcher-set number of trials per
-          condition.</p>
+          <h3>Private research toolkit</h3>
+          <p>Comply with academic rules and scientific lab procedures, 
+            stay private and interact with AI models.</p>
         </div>
         <div class="feature">
           <span class="num">02</span>
           <h3>Triple-recorded output</h3>
-          <p>Every trial lands in a per-experiment CSV, a mirrored JSONL audit
-          ledger with SHA-256 run hashes, and a full SQLite chat transcript.</p>
+          <p>Every trial lands in a per-experiment CSV, a JSONL audit
+          ledger and a full SQLite chat transcript.</p>
         </div>
         <div class="feature">
           <span class="num">03</span>
           <h3>Local and offline-first</h3>
           <p>No telemetry, no account, no required network dependency beyond
-          the provider host you point it at, e.g., Ollama. Air-gap mode blocks
-          all outbound HTTP.</p>
+          the provider host you point it at, e.g., Ollama.</p>
         </div>
         <div class="feature">
           <span class="num">04</span>
           <h3>Read-only live dashboard</h3>
-          <p>An optional local web view of the running experiment — loopback-only
-          by default, gated by the same master-password vault as the desktop app.</p>
+          <p>An optional local web view of the running experiment.</p>
         </div>
         <div class="feature">
           <span class="num">05</span>
@@ -129,8 +128,7 @@
         <div class="feature">
           <span class="num">06</span>
           <h3>Cross-platform releases</h3>
-          <p>Native builds for Windows, Linux, and Apple Silicon macOS — no
-          build step beyond <code>cargo</code>, no bundled runtime to install.</p>
+          <p>Native builds for Windows, Linux, and Apple Silicon macOS.</p>
         </div>
       </div>
     </div>
@@ -147,7 +145,6 @@
           <span class="eyebrow argum">Cognitive science, HCI &amp; experimental psychology</span>
           <h3>A proper within-subject protocol</h3>
           <ul>
-            <li>Counterbalanced condition ordering built into the trial engine</li>
             <li>Participant ID, per-trial timing, and a free-text final answer captured on a fixed schema</li>
             <li>CSV output designed to drop straight into R, Python, SPSS, or JASP</li>
             <li>A named privacy/security document written for IRB review</li>
@@ -155,11 +152,11 @@
         </div>
         <div class="track">
           <span class="eyebrow coop">AI &amp; ML researchers</span>
-          <h3>Reproducible model-behavior trials</h3>
+          <h3>Comparing model-behavior trials</h3>
           <ul>
             <li>Runs against a local model provider — Ollama is a great way to produce results</li>
             <li>Per-turn timing capture, time-to-first-token and prompt/eval token counts</li>
-            <li>Air-gapped evaluation runs against a fully local model</li>
+            <li>Air-gapped evaluation runs against fully local models</li>
           </ul>
         </div>
       </div>
@@ -176,8 +173,7 @@
           <code>axum</code> server all compile from one Rust codebase into a
           single native binary — no separate backend process, no bundled
           runtime, no interpreter. That same codebase targets Windows, Linux,
-          and macOS directly, so the same trial logic runs identically
-          wherever a study is conducted, with no build step beyond
+          and macOS directly
           <code>cargo</code>.
         </p>
       </div>
@@ -198,7 +194,6 @@
       </p>
       <div class="contact-row">
         <a class="btn primary" href="https://github.com/vecnode/humai/issues">Open an issue</a>
-        <a class="btn" href="https://ko-fi.com/vecnode">Funding</a>
       </div>
     </div>
   </section>
