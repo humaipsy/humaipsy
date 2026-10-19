@@ -402,11 +402,13 @@ Rough priority order, highest-value first:
   second one.
 - CI (`.github/workflows/ci.yml`) runs `cargo check` / `cargo test` / `cargo clippy
   -D warnings --workspace` on Linux, Windows, and macOS for every PR (not on push to
-  `main` — merges land via squash-merged PRs that already ran these checks).
-- Tag-triggered release workflows (`release-linux.yml`, `release-windows.yml`,
-  `release-macos.yml`) build `--release` and upload
-  `humaipsy-<version>-{ubu,win,mac}.{tar.gz,zip}` to the tag's GitHub Release;
-  `distribute_app.sh`/`.bat` do the equivalent for local standalone builds — both
+  `main` — merges land via squash-merged PRs that already ran these checks). It also
+  exposes `workflow_call`, so the release runs the same check rather than a copy of it.
+- One tag-triggered `release.yml` builds `--release` for three targets in a matrix
+  (`x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`),
+  attaches `humaipsy-<version>-<os>-<arch>.{zip,tar.gz}` and a `SHA256SUMS.txt` computed
+  from what was actually uploaded to a draft GitHub Release, and only then publishes it.
+  `scripts/distribute_app.sh`/`.bat` do the equivalent for local standalone builds — both
   build from `apps/humaipsy/`, and Cargo resolves the `humaipsy-core` path dependency as
   part of that build automatically, so the workspace split needed no changes to
   either distribute script.

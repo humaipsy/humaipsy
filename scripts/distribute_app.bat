@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set "ROOT_DIR=%~dp0"
+set "ROOT_DIR=%~dp0..\"
 set "APP_DIR=%ROOT_DIR%apps\humaipsy"
 set "RELEASE_DIR=%APP_DIR%\target\release"
 set "DIST_DIR=%USERPROFILE%\Desktop\humaipsy"

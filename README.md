@@ -1,6 +1,13 @@
-# HumaiPsy
+<h1 align="center">HumaiPsy</h1>
 
-[![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org) [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE) [![CI](https://github.com/humaipsy/humaipsy/actions/workflows/ci.yml/badge.svg)](https://github.com/humaipsy/humaipsy/actions/workflows/ci.yml) 
+<p align="center">
+  <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: AGPL v3" src="https://img.shields.io/badge/License-AGPLv3-blue.svg"></a>
+  <a href="https://github.com/humaipsy/humaipsy/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/humaipsy/humaipsy/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="Platform: Windows, macOS, Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue">
+  <img alt="JavaScript" src="https://img.shields.io/badge/JavaScript-F7DF1E?style=flat&logo=javascript&logoColor=black">
+  <a href="https://humaipsy.github.io/humaipsy/"><img alt="Website" src="https://img.shields.io/badge/Website-humaipsy.github.io%2Fhumaipsy-blue"></a>
+</p>
 
 🤖 HumaiPsy, application for running scientific Human-AI-agent Interaction experimentation for experimental psychology, cognitive sciences and HCI research. 
 
@@ -15,9 +22,6 @@
     </tr>
   </table>
 </p>
-
-[![Website](https://img.shields.io/badge/Website-humaipsy.github.io%2Fhumaipsy-blue)](https://humaipsy.github.io/humaipsy/)
-
 
 Features:
 
@@ -63,7 +67,7 @@ The engine (agent prompting, Ollama client, experiment recording, chat store, va
 
 ```sh
 # Rust Application Development
-./run_app.sh
+./scripts/run_app.sh
 
 # Manually
 cd ./apps/humaipsy
@@ -96,7 +100,7 @@ cargo clippy --all-targets -- -D warnings
 
 ```sh
 # Rust Application Development
-run_app.bat
+scripts\run_app.bat
 
 # Manually
 cd ./apps/humaipsy
@@ -129,7 +133,7 @@ cargo clippy --all-targets -- -D warnings
 
 ```sh
 # Rust Application Development
-./run_app.sh
+./scripts/run_app.sh
 
 # Manually
 cd ./apps/humaipsy
