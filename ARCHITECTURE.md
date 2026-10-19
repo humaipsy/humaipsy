@@ -408,10 +408,8 @@ Rough priority order, highest-value first:
   (`x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`),
   attaches `humaipsy-<version>-<os>-<arch>.{zip,tar.gz}` and a `SHA256SUMS.txt` computed
   from what was actually uploaded to a draft GitHub Release, and only then publishes it.
-  `scripts/distribute_app.sh`/`.bat` do the equivalent for local standalone builds — both
-  build from `apps/humaipsy/`, and Cargo resolves the `humaipsy-core` path dependency as
-  part of that build automatically, so the workspace split needed no changes to
-  either distribute script.
+  For a local build, `cargo build --release` is all it takes: every asset and the
+  dashboard's HTML/CSS/JS are compiled into the binary, so nothing is staged beside it.
 
 See [AGENTS.md](AGENTS.md) for exact commands, environment variables, and the
 cross-platform rules that constrain how this code can evolve.

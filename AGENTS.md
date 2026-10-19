@@ -96,7 +96,6 @@ apps/humaipsy/                      # the UI binary — depends on humaipsy-core
                                      #   truth; the Windows .ico is generated from icon_window_bar.png)
   vault/.master_hash                  # gitignored — local Argon2id hash file, created on first run
   metrics/                            # gitignored except structure — CSV/ledger exports + chat.sqlite land here
-scripts/distribute_app.sh / .bat    # build release + stage a standalone dist/ folder (see below)
 scripts/run_app.sh / .bat           # `cargo clean && cargo run` — quick dev loop
 .github/workflows/ci.yml               # runs on every PR: check/test/clippy --workspace on Linux + Windows + macOS;
                                        #   also `workflow_call`, so a release reuses it as its gate
@@ -117,15 +116,11 @@ Intel/x86_64 macOS build; add a matrix row (or a `lipo`-merged universal binary)
 that's ever needed. The Linux row pins `ubuntu-22.04` deliberately: the glibc an archive
 links against is the oldest machine that can run it.
 
-`scripts/distribute_app.sh`/`.bat` remain the local, no-CI route to a standalone `dist/` folder —
-Linux and macOS wrap `scripts/distribute_app.sh` (it's plain POSIX bash, no Linux-specific
-bits) and Windows wraps `scripts/distribute_app.bat`, each with a versioned
-`HUMAIPSY_DIST_DIR`, and
-they must stay in parity. Both scripts build from `apps/humaipsy/`; Cargo resolves
-the `humaipsy-core`/`humaipsy-web` path dependencies as part of that build automatically,
-so the workspace split needed no changes to either script. `humaipsy-web`'s static
-assets are embedded into the binary at compile time (not copied as files), so
-nothing needs staging into `dist/` for the dashboard to work in a distributed build.
+There is no separate staging step and no `dist/` folder to assemble. Everything the app
+draws is compiled in — `apps/humaipsy/assets/*.png` and the Noto emoji font via
+`include_bytes!`, `humaipsy-web`'s HTML/CSS/JS via `include_str!` — so a plain
+`cargo build --release` produces the same binary the release archives carry. The only
+thing a user adds beside it is their own `vault/.master_hash`.
 
 ## `humaipsy-core` / `apps/humaipsy` / `humaipsy-web`: where new code goes
 
@@ -212,11 +207,9 @@ This app must build and behave the same on Windows, Linux, and macOS. Concretely
   never behind a `target_os = "linux"` check unless macOS is explicitly meant to be
   excluded too. See `window_icon.rs` and `Cargo.toml`'s `[target.'cfg(windows)'...]`
   sections for the existing pattern — mirror it rather than inventing a new one.
-- **`scripts/distribute_app.sh` and `scripts/distribute_app.bat` must stay in parity.** Both build the
-  release binary, stage it into a dist folder with `assets/` and (if present)
-  `vault/.master_hash`, and respect a `HUMAIPSY_DIST_DIR` env var override. If you change
-  what one script stages or how it names things, make the equivalent change in the
-  other. Neither binary is code-signed — the Windows build will trigger a SmartScreen
+- **`scripts/run_app.sh` and `scripts/run_app.bat` must stay in parity.** Each is a thin
+  `cargo clean && cargo run` inside `apps/humaipsy/`; if you change one, change the other.
+  Neither release binary is code-signed — the Windows build will trigger a SmartScreen
   "unknown publisher" warning; that's a known, accepted state, not a bug to silently
   work around. Don't add signing scripts/CI steps unless explicitly asked.
 - **Line endings are enforced via `.gitattributes`**: `*.sh` is forced to LF, `*.bat`/
@@ -260,8 +253,8 @@ in the codebase goes through these; a new one that doesn't is a regression.
 
 ## Build / run / test
 
-All commands are run from `apps/humaipsy/` (or via the `scripts/run_app.sh`/`.bat` /
-`scripts/distribute_app.sh`/`.bat` wrappers, which `cd` into it for you). Cargo resolves the
+All commands are run from `apps/humaipsy/` (or via the `scripts/run_app.sh`/`.bat` wrapper,
+which `cd`s into it for you). Cargo resolves the
 `humaipsy-core` path dependency automatically, so these commands build/test both crates'
 code as needed even though they're invoked from the binary crate's directory; to
 target `humaipsy-core` directly (e.g. running only its tests), pass `-p humaipsy-core` or
@@ -319,22 +312,19 @@ plain `cargo check`/`test`/`clippy` invoked from inside a single member's direct
 (`apps/humaipsy/` or `crates/humaipsy-core/`) only covers that one package and silently
 skips the other member's tests and lints.
 
-### Distributing a standalone build
+### Building a release locally
 
 ```sh
-# Linux
-./scripts/distribute_app.sh         # stages to $HOME/Desktop/humaipsy by default
-HUMAIPSY_DIST_DIR=/custom/path ./scripts/distribute_app.sh
-
-# Windows
-scripts\distribute_app.bat          # stages to %USERPROFILE%\Desktop\humaipsy by default
-set HUMAIPSY_DIST_DIR=C:\custom\path && scripts\distribute_app.bat
+cargo build --release        # from apps/humaipsy/, or `cargo build --release -p humaipsy`
 ```
 
-Both scripts: build `--release`, wipe/recreate the dist dir, copy the binary + `assets/`,
-and copy `vault/.master_hash` into `dist/vault/` if it exists locally (otherwise the
-distributed app starts with no master password configured and prompts to create one on
-first launch — this is expected, not a bug).
+That binary is complete: the icons, the emoji font and the dashboard are compiled in, so
+it runs from any directory without a sibling folder. Copy `vault/.master_hash` beside it
+only if you want the build to start already unlocked — otherwise the first launch prompts
+to create a master password, which is the state to hand to someone else.
+
+Publishing is CI's job (`release.yml`). There is deliberately no `distribute_app` script:
+one staging path produces the artifacts, not two that can drift apart.
 
 ## The vault / master password gate
 
@@ -450,9 +440,8 @@ first launch — this is expected, not a bug).
   first; a write endpoint today would have nothing safe to write to.
 - `crates/humaipsy-web/web/*.html`/`.js`/`.css` are embedded into the binary via
   `include_str!` in `routes.rs`, not served from a filesystem path — editing them
-  requires a rebuild to take effect (no live-reload), and nothing needs to be staged
-  into `dist/` by `scripts/distribute_app.sh`/`.bat` for the dashboard to work in a
-  distributed build.
+  requires a rebuild to take effect (no live-reload), and nothing is staged beside the
+  binary for the dashboard to work.
 - **The dashboard is gated by the master-password vault, mirrored via a shared
   flag.** `HumaiPsyApp::update` (`ui/mod.rs`) syncs `humaipsy_core::vault::MasterVault::is_unlocked()`
   into `HumaiPsy::vault_unlocked` (`humaipsy_web::SharedVaultLock`, an `Arc<AtomicBool>`)
