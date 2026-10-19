@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HumaiPsy — Live Dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>HumaiPsy</h1>
+    <span id="connection-state" class="pill pill-connecting">connecting…</span>
+  </header>
+
+  <main>
+    <section id="status-panel" class="panel">
+      <h2>Experiment status</h2>
+      <dl id="status-fields">
+        <dt>Design</dt><dd id="status-design">—</dd>
+        <dt>Participant</dt><dd id="status-participant">—</dd>
+        <dt>Condition</dt><dd id="status-condition">—</dd>
+        <dt>Trial</dt><dd id="status-trial">—</dd>
+        <dt>Timer</dt><dd id="status-timer">—</dd>
+        <dt>State</dt><dd id="status-running">—</dd>
+      </dl>
+    </section>
+
+    <section id="chat-panel" class="panel">
+      <h2>Live transcript</h2>
+      <div id="messages"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Read-only view of the running HumaiPsy desktop app. Nothing here can control the experiment.</p>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

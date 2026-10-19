@@ -3,8 +3,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_DIR="$ROOT_DIR/apps/humai"
-DIST_DIR="${HUMAI_DIST_DIR:-$HOME/Desktop/humai}"
+APP_DIR="$ROOT_DIR/apps/humaipsy"
+DIST_DIR="${HUMAIPSY_DIST_DIR:-$HOME/Desktop/humaipsy}"
 
 echo "[1/3] Building release binary..."
 cd "$APP_DIR"
@@ -12,7 +12,7 @@ cargo build --release
 
 TARGET_DIR="$(cargo metadata --format-version=1 --no-deps --manifest-path Cargo.toml \
   | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
-RELEASE_BIN="$TARGET_DIR/release/humai"
+RELEASE_BIN="$TARGET_DIR/release/humaipsy"
 
 if [[ ! -f "$RELEASE_BIN" ]]; then
   echo "ERROR: Release binary not found at $RELEASE_BIN" >&2
@@ -24,8 +24,8 @@ rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
 echo "[3/3] Copying release files..."
-cp "$RELEASE_BIN" "$DIST_DIR/humai"
-chmod +x "$DIST_DIR/humai"
+cp "$RELEASE_BIN" "$DIST_DIR/humaipsy"
+chmod +x "$DIST_DIR/humaipsy"
 
 if [[ -d "$APP_DIR/assets" ]]; then
   cp -a "$APP_DIR/assets" "$DIST_DIR/assets"

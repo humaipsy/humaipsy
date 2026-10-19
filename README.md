@@ -1,16 +1,16 @@
-# Humai
+# HumaiPsy
 
 [![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org) [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE) [![CI](https://github.com/humaipsy/humaipsy/actions/workflows/ci.yml/badge.svg)](https://github.com/humaipsy/humaipsy/actions/workflows/ci.yml) 
 
-🤖 Humai, application for running scientific Human-AI-agent Interaction experimentation for experimental psychology, cognitive sciences and HCI research. 
+🤖 HumaiPsy, application for running scientific Human-AI-agent Interaction experimentation for experimental psychology, cognitive sciences and HCI research. 
 
 <p align="center">
   <table width="80%">
     <tr>
-      <td width="50%"><img src="./assets/panel_1.png" alt="Humai panel 1" width="100%"></td>
+      <td width="50%"><img src="./assets/panel_1.png" alt="HumaiPsy panel 1" width="100%"></td>
       <td width="50%">
-        <img src="./assets/panel_2.png" alt="Humai panel 2" width="100%"><br>
-        <img src="./assets/panel_3.png" alt="Humai panel 3" width="100%">
+        <img src="./assets/panel_2.png" alt="HumaiPsy panel 2" width="100%"><br>
+        <img src="./assets/panel_3.png" alt="HumaiPsy panel 3" width="100%">
       </td>
     </tr>
   </table>
@@ -28,10 +28,10 @@ Features:
 
 For how the app is put together (process model, module layout, storage formats, known limitations, and what's planned next) see [ARCHITECTURE.md](ARCHITECTURE.md). For contributor rules (build/run/test commands, cross-platform gotchas, release process) see [AGENTS.md](AGENTS.md). For what's actually protected (and what isn't) if you're handling real participant data, see [SECURITY.md](SECURITY.md).
 
-The engine (agent prompting, Ollama client, experiment recording, chat store, vault) lives in the `humai-core` library crate with no UI dependency; `apps/humai` is the `eframe`/`egui` desktop binary built on top of it. We also add a live viewer for a secondary screen.
+The engine (agent prompting, Ollama client, experiment recording, chat store, vault) lives in the `humaipsy-core` library crate with no UI dependency; `apps/humaipsy` is the `eframe`/`egui` desktop binary built on top of it. We also add a live viewer for a secondary screen.
 
 <p align="center">
-  <img src="./assets/live_view.png" alt="Humai live viewer" width="60%">
+  <img src="./assets/live_view.png" alt="HumaiPsy live viewer" width="60%">
 </p>
 
 ## Dependencies
@@ -51,9 +51,9 @@ The engine (agent prompting, Ollama client, experiment recording, chat store, va
 
 ## Components
 
-- [humai](./apps/humai/)
-- [humai-web](./crates/humai-web/)
-- [humai-core](./crates/humai-core/)
+- [humaipsy](./apps/humaipsy/)
+- [humaipsy-web](./crates/humaipsy-web/)
+- [humaipsy-core](./crates/humaipsy-core/)
 
 ## Development
 
@@ -66,7 +66,7 @@ The engine (agent prompting, Ollama client, experiment recording, chat store, va
 ./run_app.sh
 
 # Manually
-cd ./apps/humai
+cd ./apps/humaipsy
 
 # Fast compile check (all bins and tests)
 cargo check --all-targets
@@ -74,13 +74,13 @@ cargo check --all-targets
 # Run app (UI only)
 cargo run
 
-# Run the helper binary to create/update vault/.master_hash (run from apps/humai/)
+# Run the helper binary to create/update vault/.master_hash (run from apps/humaipsy/)
 cargo run --bin gen_master_hash
 
 # Build release binary
 cargo build --release
 
-# Run tests (add --workspace from the repo root to also cover the humai-core crate)
+# Run tests (add --workspace from the repo root to also cover the humaipsy-core crate)
 cargo test
 
 # Lint — CI-equivalent gate, must pass clean
@@ -99,7 +99,7 @@ cargo clippy --all-targets -- -D warnings
 run_app.bat
 
 # Manually
-cd ./apps/humai
+cd ./apps/humaipsy
 
 # Fast compile check (all bins and tests)
 cargo check --all-targets
@@ -107,13 +107,13 @@ cargo check --all-targets
 # Run app (UI only)
 cargo run
 
-# Run the helper binary to create/update vault/.master_hash (run from apps/humai/)
+# Run the helper binary to create/update vault/.master_hash (run from apps/humaipsy/)
 cargo run --bin gen_master_hash
 
 # Build release binary
 cargo build --release
 
-# Run tests (add --workspace from the repo root to also cover the humai-core crate)
+# Run tests (add --workspace from the repo root to also cover the humaipsy-core crate)
 cargo test
 
 # Lint — CI-equivalent gate, must pass clean
@@ -132,7 +132,7 @@ cargo clippy --all-targets -- -D warnings
 ./run_app.sh
 
 # Manually
-cd ./apps/humai
+cd ./apps/humaipsy
 
 # Fast compile check (all bins and tests)
 cargo check --all-targets
@@ -140,13 +140,13 @@ cargo check --all-targets
 # Run app (UI only)
 cargo run
 
-# Run the helper binary to create/update vault/.master_hash (run from apps/humai/)
+# Run the helper binary to create/update vault/.master_hash (run from apps/humaipsy/)
 cargo run --bin gen_master_hash
 
 # Build release binary
 cargo build --release
 
-# Run tests (add --workspace from the repo root to also cover the humai-core crate)
+# Run tests (add --workspace from the repo root to also cover the humaipsy-core crate)
 cargo test
 
 # Lint — CI-equivalent gate, must pass clean

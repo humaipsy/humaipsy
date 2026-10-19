@@ -2,6 +2,10 @@ name: CI
 
 on:
   pull_request:
+  # Called by release.yml as its gate, so a tag is only ever cut over a tree that
+  # passed exactly what a pull request passes — not a second copy of the same steps.
+  workflow_call:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -46,8 +50,8 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      # --workspace is required: apps/humai, crates/humai-core, and
-      # crates/humai-web are three separate workspace members, and a plain
+      # --workspace is required: apps/humaipsy, crates/humaipsy-core, and
+      # crates/humaipsy-web are three separate workspace members, and a plain
       # `cargo test` run from any one member's own directory only tests that
       # one package — it silently skips the other members' tests/lints, it
       # doesn't error.

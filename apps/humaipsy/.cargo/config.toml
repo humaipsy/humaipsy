@@ -1,0 +1,5 @@
+[build]
+# Keep the compiled artifacts inside apps/humaipsy/target/ instead of the
+# workspace root target/, so you can cd into this directory and run
+# cargo commands without the -p flag.
+target-dir = "target"

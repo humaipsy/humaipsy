@@ -1,0 +1,16 @@
+[package]
+name = "humaipsy-web"
+description = "Local read-only browser dashboard for a running HumaiPsy instance: serves plain HTML/JS/CSS and a small JSON API over the chat Store."
+version = "0.1.6"
+edition = "2024"
+rust-version = "1.85"
+license = "AGPL-3.0-only"
+
+[dependencies]
+humaipsy-core = { path = "../humaipsy-core" }
+
+anyhow = "1.0"
+axum = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt", "net"] }
