@@ -1,6 +1,6 @@
 # Privacy & Security
 
-Humai is a research tool: it can carry participant IDs, full chat transcripts, and
+HumaiPsy is a research tool: it can carry participant IDs, full chat transcripts, and
 free-text final answers — potentially sensitive human-subjects data. This document
 explains, honestly and specifically, what the application actually does to protect
 that data, what it does *not* do, and what an operator (a researcher, an IRB
@@ -10,11 +10,11 @@ It describes the implementation as it exists in the code today, not aspirations.
 If you take one thing from this document: **the master-password vault gates access
 to the running application; it does not encrypt the data files on disk.** See
 [Data at rest](#data-at-rest-what-is-and-isnt-encrypted) below — this is the single
-most important thing to understand about Humai's actual privacy posture.
+most important thing to understand about HumaiPsy's actual privacy posture.
 
 ## Threat model
 
-Humai is designed around one primary boundary: **the local machine it runs on**.
+HumaiPsy is designed around one primary boundary: **the local machine it runs on**.
 Everything it does — inference, recording, storage — happens on that machine unless
 an operator explicitly configures a remote Ollama host. It is not designed to defend
 against a compromised OS, a determined attacker with physical or administrator
@@ -32,7 +32,7 @@ Each is covered below, along with its real limits.
 
 ### Outbound: the Ollama connection
 
-The only network call Humai makes by default is to whatever `OLLAMA_HOST` is
+The only network call HumaiPsy makes by default is to whatever `OLLAMA_HOST` is
 configured to (default `http://127.0.0.1:11434`). **With air-gap mode off — the
 default — there is no restriction on what host that can be.** If an operator points
 `OLLAMA_HOST` at a remote server, full experiment transcripts (every message, every
@@ -43,20 +43,20 @@ made a deliberate choice otherwise.
 
 ### Air-gap mode
 
-Setting `HUMAI_AIR_GAP=1` blocks all outbound HTTP except to a loopback Ollama host
-(`127.0.0.1`, `::1`, or `localhost`); `HUMAI_ALLOW_LOCAL_OLLAMA=0` blocks the
+Setting `HUMAIPSY_AIR_GAP=1` blocks all outbound HTTP except to a loopback Ollama host
+(`127.0.0.1`, `::1`, or `localhost`); `HUMAIPSY_ALLOW_LOCAL_OLLAMA=0` blocks the
 loopback exception too, i.e. no outbound HTTP at all. This is enforced centrally —
-every HTTP call site in `humai-core::ollama` goes through
+every HTTP call site in `humaipsy-core::ollama` goes through
 `guard_ollama_request` before a request is sent, not just hidden behind a disabled
 UI button — and is covered by unit tests
-(`crates/humai-core/src/ollama/mod.rs::tests::guard_ollama_request_enforces_air_gap_policy`)
+(`crates/humaipsy-core/src/ollama/mod.rs::tests::guard_ollama_request_enforces_air_gap_policy`)
 that assert the exact enforcement matrix: air-gap off → anything allowed; air-gap on
 with local Ollama allowed → only loopback hosts pass; air-gap on with local Ollama
 also disabled → nothing passes. (Those tests caught a real bug during development —
 IPv6 loopback addresses in bracketed form, e.g. `[::1]`, were being misidentified as
 non-loopback and incorrectly blocked; fixed and now regression-tested.)
 
-Air-gap mode is **read from `HUMAI_AIR_GAP`/`HUMAI_ALLOW_LOCAL_OLLAMA` once at
+Air-gap mode is **read from `HUMAIPSY_AIR_GAP`/`HUMAIPSY_ALLOW_LOCAL_OLLAMA` once at
 startup** — there is no in-app toggle. That's deliberate: a runtime UI switch is one
 that can be flipped accidentally mid-study; requiring an environment variable at
 launch means the setting is a conscious choice made before a session starts, not
@@ -64,22 +64,22 @@ something a stray click can silently disable.
 
 ### Inbound: the local web dashboard
 
-`crates/humai-web` is a small local dashboard, spawned automatically inside the
+`crates/humaipsy-web` is a small local dashboard, spawned automatically inside the
 desktop app's own process, that serves a read-only view of the current experiment
 over HTTP:
 
-- **Bound to `127.0.0.1` by default.** `HUMAI_WEB_BIND` can widen this (e.g. to
+- **Bound to `127.0.0.1` by default.** `HUMAIPSY_WEB_BIND` can widen this (e.g. to
   `0.0.0.0:8787` for LAN access) — doing so is an explicit, deliberate choice an
-  operator has to make; it is never the default. `HUMAI_WEB_DISABLED=1` turns the
+  operator has to make; it is never the default. `HUMAIPSY_WEB_DISABLED=1` turns the
   server off entirely.
-- **No write path exists.** Every route is a `GET`; nothing served by `humai-web`
+- **No write path exists.** Every route is a `GET`; nothing served by `humaipsy-web`
   can start a trial, send a message, or otherwise mutate application state. There is
   currently no code path by which the dashboard could be used to control the
   experiment, by accident or otherwise.
 - **Gated by the same master-password vault as the desktop app.** This wasn't true
   in the first version of the dashboard and was fixed once identified: the desktop
   app's vault-lock state (`MasterVault::is_unlocked()`) is mirrored into a shared
-  flag (`humai_web::SharedVaultLock`) that `HumaiApp::update` syncs every frame. The
+  flag (`humaipsy_web::SharedVaultLock`) that `HumaiPsyApp::update` syncs every frame. The
   dashboard's `/api/status` and `/api/messages` routes check that flag *before*
   touching any state or the database, and return empty/blanked responses whenever
   it's `false`. Locking the desktop app (the Settings "Lock" button) now stops the
@@ -91,10 +91,10 @@ over HTTP:
   dashboard's HTTP surface itself. Anyone who can reach the bound address while the
   app is unlocked can view the transcript — on a single-user machine with the
   loopback-only default, that's "any process running as any user on that machine";
-  if `HUMAI_WEB_BIND` is widened to a LAN address, it's "anyone on that network."
+  if `HUMAIPSY_WEB_BIND` is widened to a LAN address, it's "anyone on that network."
   Treat widening the bind address as equivalent to deciding who gets to watch the
   session live, because that's exactly what it does.
-- The dashboard's static assets (`crates/humai-web/web/*.html`/`.js`/`.css`) are
+- The dashboard's static assets (`crates/humaipsy-web/web/*.html`/`.js`/`.css`) are
   embedded into the binary at compile time and reference no external resources — no
   CDN scripts, no remote fonts, no third-party analytics. Opening the dashboard page
   makes no network calls other than to the desktop app's own local API.
@@ -104,11 +104,11 @@ over HTTP:
 - **Release builds always enforce the master-password lock**; the app boots straight
   to an unlock screen and nothing else renders until a correct password is entered.
   Debug builds skip this by default for faster local iteration
-  (`HUMAI_ENABLE_PASSWORD_LOCK=1` to enforce it in a debug build anyway,
-  `HUMAI_SKIP_VAULT=1` to force-skip even then).
+  (`HUMAIPSY_ENABLE_PASSWORD_LOCK=1` to enforce it in a debug build anyway,
+  `HUMAIPSY_SKIP_VAULT=1` to force-skip even then).
 - The password is hashed with **Argon2id** (memory-hard, GPU/ASIC-resistant),
   default parameters 64 MiB memory cost, 3 iterations, parallelism up to the
-  machine's core count (capped at 4) — tunable via `HUMAI_ARGON2_M_KIB`/`_T`/`_P` if
+  machine's core count (capped at 4) — tunable via `HUMAIPSY_ARGON2_M_KIB`/`_T`/`_P` if
   a deployment needs different cost/latency tradeoffs. The stored artifact
   (`vault/.master_hash`) is a one-line PHC-format hash string, never the password
   itself, and is regenerated via `cargo run --bin gen_master_hash`.
@@ -120,7 +120,7 @@ over HTTP:
 
 ## Data at rest: what is and isn't encrypted
 
-This is the section to read carefully. Humai writes several files during and after
+This is the section to read carefully. HumaiPsy writes several files during and after
 an experiment, all of them **plaintext**, all of them under the same "protection" as
 any other file on the machine:
 
@@ -137,7 +137,7 @@ disk in a plain CSV and a plain SQLite database, readable by anything with
 filesystem access to those paths — a different local user account (if file
 permissions allow, see below), a backup tool, a forensic image, another process
 running as the same user, or a person with a screwdriver and the disk. Locking the
-Humai UI does not change any of that.
+HumaiPsy UI does not change any of that.
 
 What file-level protection *does* exist:
 
@@ -148,7 +148,7 @@ What file-level protection *does* exist:
   (`vault.rs::restrict_to_owner`, `store.rs`'s equivalent), not left to the OS default.
 - On **Windows**, this is a no-op — per-user profile directory ACLs already restrict
   cross-account access to files under a user's own profile, so there's no additional
-  step Humai takes (or needs to take) there.
+  step HumaiPsy takes (or needs to take) there.
 - Neither mechanism protects against another process **running as the same OS
   user**, which can read anything that user can read regardless of the `0600`/ACL
   setting. That's a fundamentally different, and much stronger, threat model than
@@ -156,9 +156,9 @@ What file-level protection *does* exist:
 
 **If you are handling real human-subjects data and need protection against someone
 with access to the machine or its disk, that protection has to come from outside
-Humai** — full-disk encryption (BitLocker, FileVault, LUKS), an encrypted volume for
+HumaiPsy** — full-disk encryption (BitLocker, FileVault, LUKS), an encrypted volume for
 the `metrics/` output directory, or physical security of the machine. This isn't a
-gap Humai silently hides; it's a boundary the application doesn't claim to cross.
+gap HumaiPsy silently hides; it's a boundary the application doesn't claim to cross.
 
 ## Filename / path safety
 
@@ -187,12 +187,12 @@ configured output directory. Covered by tests
 
 1. Use a **release build** (the password lock can't be accidentally skipped the way
    it can in debug), and set a real master password before the first session.
-2. Set `HUMAI_AIR_GAP=1` with Ollama running locally, unless you have a specific,
+2. Set `HUMAIPSY_AIR_GAP=1` with Ollama running locally, unless you have a specific,
    trusted reason to use a remote host.
 3. Leave the web dashboard on its loopback-only default, or set
-   `HUMAI_WEB_DISABLED=1` if you don't need it — don't widen `HUMAI_WEB_BIND` on a
+   `HUMAIPSY_WEB_DISABLED=1` if you don't need it — don't widen `HUMAIPSY_WEB_BIND` on a
    shared network unless you specifically want the session visible to that network.
-4. Enable full-disk encryption on the machine running Humai — this is the actual
+4. Enable full-disk encryption on the machine running HumaiPsy — this is the actual
    answer to "is the data protected at rest," not anything in this application.
 5. Treat the `metrics/` output directory (CSV, ledger, SQLite) the same way you'd
    treat any other folder of unencrypted participant data on a shared or portable
