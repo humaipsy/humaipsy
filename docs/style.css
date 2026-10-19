@@ -115,24 +115,41 @@
   nav.masthead-links a:hover { color: var(--ink); }
 
   /* Hero */
-  .hero { padding: 64px 0 40px; }
-  .hero .eyebrow { color: var(--coop); }
+  /* One left-anchored column. The block starts at the same x as the wordmark and the
+     type does the work, instead of sitting in a centred 700px measure with the
+     headline wrapping to six ragged lines. */
+  .hero { padding: 78px 0 64px; }
+  .hero .prose { max-width: 1040px; }
+  .hero .rule {
+    border: 0;
+    border-top: 1px solid var(--line-strong);
+    margin: 0 0 26px;
+  }
+  .hero .eyebrow { color: var(--coop); margin-bottom: 22px; }
   .hero h1 {
-    font-size: clamp(34px, 5vw, 52px);
-    line-height: 1.12;
-    max-width: 15ch;
+    font-size: clamp(40px, 4.9vw, 66px);
+    line-height: 1.04;
+    letter-spacing: -0.018em;
+    max-width: 19ch;
   }
   .hero p.lede {
-    max-width: 62ch;
+    max-width: 54ch;
     font-size: 19px;
+    line-height: 1.55;
     color: var(--ink-soft);
-    margin: 22px 0 0;
+    margin: 28px 0 0;
   }
   .hero .cta-row {
     display: flex;
     gap: 14px;
-    margin-top: 30px;
+    margin-top: 36px;
     flex-wrap: wrap;
+  }
+  .hero .btn { padding: 13px 22px; font-size: 14.5px; }
+
+  @media (max-width: 700px) {
+    .hero { padding: 52px 0 44px; }
+    .hero h1 { max-width: 15ch; }
   }
   .btn {
     display: inline-flex;
