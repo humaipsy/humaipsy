@@ -9,7 +9,7 @@
   <a href="https://humaipsy.github.io/humaipsy/"><img alt="Website" src="https://img.shields.io/badge/Website-humaipsy.github.io%2Fhumaipsy-blue"></a>
 </p>
 
-🤖 HumaiPsy, application for running scientific Human-AI-agent Interaction experimentation for experimental psychology, cognitive sciences and HCI research. 
+🤖 HumaiPsy 🤖 application for running Scientific Human-AI-agent Interaction experimentation for Experimental Psychology, Cognitive Sciences and HCI research. 
 
 <p align="center">
   <table width="80%">
@@ -26,7 +26,7 @@
 Features:
 
 - Cross-platform desktop application (Windows, Linux, macOS) for Human-AI Interaction research
-- Runs a multi-condition (e.g., Cooperative / Argumentative), counterbalanced chat experiment against a local or remote [Ollama](https://ollama.com) model, with a researcher-configurable number of trials per condition
+- Runs a multi-condition (e.g., Cooperative / Argumentative), chat experiment against a local or remote [Ollama](https://ollama.com) model, with a researcher-configurable number of trials per condition
 - Local and offline-first: no telemetry, no required network dependency beyond the Ollama host you point it at. An optional local read-only web dashboard (loopback-only by default) can be viewed in a browser while the app is running
 - Every trial is recorded to CSV, a mirrored JSONL audit-trail ledger, and a local SQLite chat log
 
