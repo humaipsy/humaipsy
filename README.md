@@ -25,8 +25,8 @@
 
 Features:
 
-- Cross-platform desktop application (Windows, Linux, macOS) for Human-AI Interaction research
-- Runs a multi-condition (e.g., Cooperative / Argumentative), chat experiment against a local or remote [Ollama](https://ollama.com) model, with a researcher-configurable number of trials per condition
+- Cross-platform desktop application (Windows, Linux, macOS) for Human - Social AI Interaction research
+- Runs a multi-condition trials-based (e.g., Cooperative versus Argumentative) Human -AI chat experiments, with local or remote [Ollama](https://ollama.com) model, enabling researcher-configurable number of trials per condition
 - Local and offline-first: no telemetry, no required network dependency beyond the Ollama host you point it at. An optional local read-only web dashboard (loopback-only by default) can be viewed in a browser while the app is running
 - Every trial is recorded to CSV, a mirrored JSONL audit-trail ledger, and a local SQLite chat log
 
