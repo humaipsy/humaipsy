@@ -590,10 +590,6 @@ figcaption .fig__no {
     gap: 14px;
     font-size: 13.5px;
   }
-  .nav .btn {
-    padding: 8px 12px;
-    font-size: 13px;
-  }
 }
 
 /* ----------------------------------------------------------------- print -- */
