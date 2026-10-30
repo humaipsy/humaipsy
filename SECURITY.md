@@ -1,16 +1,16 @@
 # Privacy & Security
 
 HumaiPsy is a research tool: it can carry participant IDs, full chat transcripts, and
-free-text final answers — potentially sensitive human-subjects data. This document
-explains, honestly and specifically, what the application actually does to protect
+free-text final answers - potentially sensitive human-subjects data. This document
+explains what the application does to protect
 that data, what it does *not* do, and what an operator (a researcher, an IRB
 reviewer, a system administrator) should know before running a real study with it.
-It describes the implementation as it exists in the code today, not aspirations.
+It describes the implementation as it exists in the code today.
 
 If you take one thing from this document: **the master-password vault gates access
 to the running application; it does not encrypt the data files on disk.** See
-[Data at rest](#data-at-rest-what-is-and-isnt-encrypted) below — this is the single
-most important thing to understand about HumaiPsy's actual privacy posture.
+[Data at rest](#data-at-rest-what-is-and-isnt-encrypted) below - this is the single
+most important thing to understand about HumaiPsy's privacy posture.
 
 ## Threat model
 
@@ -18,8 +18,7 @@ HumaiPsy is designed around one primary boundary: **the local machine it runs on
 Everything it does — inference, recording, storage — happens on that machine unless
 an operator explicitly configures a remote Ollama host. It is not designed to defend
 against a compromised OS, a determined attacker with physical or administrator
-access to the machine, or a malicious remote Ollama host the operator chose to point
-it at. Its actual protections are:
+access to the machine, or a malicious remote Ollama host. Its actual protections are:
 
 1. **Keeping data from leaving the machine by default** (network boundary).
 2. **Gating who can look at the running application** (the master-password vault).
@@ -36,10 +35,7 @@ The only network call HumaiPsy makes by default is to whatever `OLLAMA_HOST` is
 configured to (default `http://127.0.0.1:11434`). **With air-gap mode off — the
 default — there is no restriction on what host that can be.** If an operator points
 `OLLAMA_HOST` at a remote server, full experiment transcripts (every message, every
-model response) are sent to that host. This is intentional — a remote/shared Ollama
-deployment is a supported use case — but it means the privacy properties described
-in this document assume a trusted, typically loopback, Ollama target unless you've
-made a deliberate choice otherwise.
+model response) are sent to that host.
 
 ### Air-gap mode
 
@@ -47,20 +43,12 @@ Setting `HUMAIPSY_AIR_GAP=1` blocks all outbound HTTP except to a loopback Ollam
 (`127.0.0.1`, `::1`, or `localhost`); `HUMAIPSY_ALLOW_LOCAL_OLLAMA=0` blocks the
 loopback exception too, i.e. no outbound HTTP at all. This is enforced centrally —
 every HTTP call site in `humaipsy-core::ollama` goes through
-`guard_ollama_request` before a request is sent, not just hidden behind a disabled
-UI button — and is covered by unit tests
+`guard_ollama_request` before a request is sent - and is covered by unit tests
 (`crates/humaipsy-core/src/ollama/mod.rs::tests::guard_ollama_request_enforces_air_gap_policy`)
 that assert the exact enforcement matrix: air-gap off → anything allowed; air-gap on
 with local Ollama allowed → only loopback hosts pass; air-gap on with local Ollama
-also disabled → nothing passes. (Those tests caught a real bug during development —
-IPv6 loopback addresses in bracketed form, e.g. `[::1]`, were being misidentified as
-non-loopback and incorrectly blocked; fixed and now regression-tested.)
+also disabled → nothing passes.
 
-Air-gap mode is **read from `HUMAIPSY_AIR_GAP`/`HUMAIPSY_ALLOW_LOCAL_OLLAMA` once at
-startup** — there is no in-app toggle. That's deliberate: a runtime UI switch is one
-that can be flipped accidentally mid-study; requiring an environment variable at
-launch means the setting is a conscious choice made before a session starts, not
-something a stray click can silently disable.
 
 ### Inbound: the local web dashboard
 

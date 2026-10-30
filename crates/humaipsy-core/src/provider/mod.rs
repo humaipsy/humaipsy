@@ -6,7 +6,7 @@
 //!
 //! Adding a new backend (OpenAI, Anthropic, ...) later means writing a new
 //! `impl Provider for SomeProvider` here and constructing it at the call site —
-//! nothing in `agent.rs` or `apps/humaipsy` needs to branch on which backend is in
+//! nothing in `agent.rs` or `humaipsy` needs to branch on which backend is in
 //! use. No such backend exists yet; this crate ships exactly one implementation.
 
 pub mod ollama_provider;

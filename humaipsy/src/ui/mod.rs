@@ -9,6 +9,7 @@ use tokio::runtime::Handle;
 mod panel_render;
 mod settings_panel;
 mod overview_chat;
+mod theme;
 mod vault_panel;
 
 pub(crate) struct OllamaUiState {
@@ -55,28 +56,14 @@ fn prepare_shell(
 	ctx: &egui::Context,
 	selected_theme: crate::app_model::CatppuccinTheme,
 	last_applied_theme: &mut Option<crate::app_model::CatppuccinTheme>,
-	phosphor_fonts_installed: &mut bool,
+	custom_fonts_installed: &mut bool,
 ) {
 	if *last_applied_theme != Some(selected_theme) {
-		match selected_theme {
-			crate::app_model::CatppuccinTheme::Latte => {
-				catppuccin_egui::set_theme(ctx, catppuccin_egui::LATTE)
-			}
-			crate::app_model::CatppuccinTheme::Frappe => {
-				catppuccin_egui::set_theme(ctx, catppuccin_egui::FRAPPE)
-			}
-			crate::app_model::CatppuccinTheme::Macchiato => {
-				catppuccin_egui::set_theme(ctx, catppuccin_egui::MACCHIATO)
-			}
-			crate::app_model::CatppuccinTheme::Mocha => {
-				catppuccin_egui::set_theme(ctx, catppuccin_egui::MOCHA)
-			}
-		}
+		theme::apply(ctx, selected_theme);
 		*last_applied_theme = Some(selected_theme);
 	}
-	if !*phosphor_fonts_installed {
+	if !*custom_fonts_installed {
 		let mut fonts = ctx.fonts(|f| f.definitions().clone());
-		egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
 
 		let emoji_font_name = "emoji-fallback".to_string();
 		fonts.font_data.insert(
@@ -90,7 +77,7 @@ fn prepare_shell(
 			monospace.push(emoji_font_name);
 		}
 		ctx.set_fonts(fonts);
-		*phosphor_fonts_installed = true;
+		*custom_fonts_installed = true;
 	}
 }
 
@@ -124,7 +111,7 @@ pub struct HumaiPsyApp {
 	humaipsy: HumaiPsy,
 	ui_state: HumaiPsyUiState,
 	last_applied_theme: Option<crate::app_model::CatppuccinTheme>,
-	phosphor_fonts_installed: bool,
+	custom_fonts_installed: bool,
 }
 
 impl HumaiPsyApp {
@@ -134,18 +121,19 @@ impl HumaiPsyApp {
 			humaipsy: HumaiPsy::new(rt_handle),
 			ui_state: HumaiPsyUiState::default(),
 			last_applied_theme: None,
-			phosphor_fonts_installed: false,
+			custom_fonts_installed: false,
 		}
 	}
 }
 
 impl eframe::App for HumaiPsyApp {
-	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+	fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+		let ctx = ui.ctx().clone();
 		prepare_shell(
-			ctx,
+			&ctx,
 			self.humaipsy.catppuccin_theme,
 			&mut self.last_applied_theme,
-			&mut self.phosphor_fonts_installed,
+			&mut self.custom_fonts_installed,
 		);
 
 		// The web dashboard (humaipsy-web) mirrors this flag on every request and
@@ -157,7 +145,7 @@ impl eframe::App for HumaiPsyApp {
 			.store(self.vault.is_unlocked(), std::sync::atomic::Ordering::Relaxed);
 
 		if !self.vault.is_unlocked() {
-			egui::CentralPanel::default().show(ctx, |ui| {
+			egui::CentralPanel::default().show(ui, |ui| {
 				ui.vertical_centered(|ui| {
 					ui.add_space(40.0);
 					vault_panel::show_unlock_ui(&mut self.vault, ui);
@@ -166,8 +154,8 @@ impl eframe::App for HumaiPsyApp {
 			return;
 		}
 
-		refresh_ollama_models_on_startup(&self.humaipsy, &mut self.ui_state, ctx);
-		egui::CentralPanel::default().show(ctx, |ui| {
+		refresh_ollama_models_on_startup(&self.humaipsy, &mut self.ui_state, &ctx);
+		egui::CentralPanel::default().show(ui, |ui| {
 			ui.vertical(|ui| {
 				ui.set_min_height(ui.available_height());
 				if self.humaipsy.render_main_panel(ui, &mut self.ui_state) {
@@ -191,9 +179,10 @@ mod tests {
 		// without our bundled fallback these would render as missing-glyph boxes.
 		let ctx = egui::Context::default();
 		let mut has_emoji = false;
-		let _ = ctx.run(Default::default(), |ctx| {
-			has_emoji = ctx.fonts_mut(|f| f.has_glyphs(&egui::FontId::default(), SAMPLE_EMOJI));
+		let mut output = ctx.run_ui(Default::default(), |ui| {
+			has_emoji = ui.ctx().fonts_mut(|f| f.has_glyphs(&egui::FontId::default(), SAMPLE_EMOJI));
 		});
+		output.textures_delta.clear();
 		assert!(!has_emoji, "test fixture assumption changed: stock egui fonts now cover emoji");
 	}
 
@@ -206,20 +195,22 @@ mod tests {
 		// `Context::set_fonts` (called inside `prepare_shell`) only queues the new
 		// font definitions; they're applied at the *next* pass's `begin_pass`. So
 		// this takes two passes: one to install the fonts, one to observe them.
-		let _ = ctx.run(Default::default(), |ctx| {
+		let mut output = ctx.run_ui(Default::default(), |ui| {
 			prepare_shell(
-				ctx,
+				ui.ctx(),
 				crate::app_model::CatppuccinTheme::Latte,
 				&mut last_theme,
 				&mut installed,
 			);
 		});
+		output.textures_delta.clear();
 		assert!(installed);
 
 		let mut has_emoji = false;
-		let _ = ctx.run(Default::default(), |ctx| {
-			has_emoji = ctx.fonts_mut(|f| f.has_glyphs(&egui::FontId::default(), SAMPLE_EMOJI));
+		let mut output = ctx.run_ui(Default::default(), |ui| {
+			has_emoji = ui.ctx().fonts_mut(|f| f.has_glyphs(&egui::FontId::default(), SAMPLE_EMOJI));
 		});
+		output.textures_delta.clear();
 		assert!(
 			has_emoji,
 			"bundled NotoEmoji fallback should cover common emoji on every platform"

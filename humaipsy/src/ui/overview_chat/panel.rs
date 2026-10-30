@@ -8,10 +8,11 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
-use egui_phosphor::regular;
 
 use humaipsy_core::agent::timing_to_inference_snapshot;
-use crate::app_model::{GlobalChatMode, HumaiPsy};
+use crate::app_model::{
+    DEFAULT_ARGUM_AGENT_NAME, DEFAULT_COOP_AGENT_NAME, GlobalChatMode, HumaiPsy,
+};
 use humaipsy_core::metrics::{
     display_csv_path, ExperimentDesignSnapshot, MetricsConfig, SessionMetadata,
     TrialMetadata,
@@ -108,9 +109,9 @@ fn total_experiment_trials(design: &HumaiPsyExpDesign) -> usize {
 }
 
 fn trial_descriptor(design: &HumaiPsyExpDesign, index: usize) -> TrialDescriptor {
-    humaipsy_core::experiment::trial_descriptor(
+    humaipsy_core::experiment::trial_descriptor_with_start(
         index,
-        &design.participant_id,
+        design.start_condition == StartCondition::Condition2,
         humaipsy_core::experiment::clamp_condition_count(design.conditions),
     )
 }
@@ -183,19 +184,54 @@ fn update_web_status(app: &HumaiPsy, state: &OverviewChatUiState) {
     *app.web_status.lock_recover() = snapshot;
 }
 
+/// A blank name field keeps the agent's fallback name instead of turning into
+/// an empty identity sentence in the prompt.
+fn effective_agent_name<'a>(name: &'a str, fallback: &'a str) -> &'a str {
+    let trimmed = name.trim();
+    if trimmed.is_empty() { fallback } else { trimmed }
+}
+
+fn agent_name_for_condition<'a>(
+    condition: &str,
+    coop_name: &'a str,
+    argum_name: &'a str,
+) -> &'a str {
+    match condition {
+        "ARGUM" => effective_agent_name(argum_name, DEFAULT_ARGUM_AGENT_NAME),
+        _ => effective_agent_name(coop_name, DEFAULT_COOP_AGENT_NAME),
+    }
+}
+
+fn current_agent_name<'a>(
+    design: &HumaiPsyExpDesign,
+    state: &ExperimentSessionState,
+    coop_name: &'a str,
+    argum_name: &'a str,
+) -> &'a str {
+    let desc = current_trial_descriptor_from_state(design, state);
+    let condition = humaipsy_core::experiment::condition_name(desc.condition_index);
+    agent_name_for_condition(condition, coop_name, argum_name)
+}
+
+/// The selected condition's prompt, prefixed with the identity line that gives
+/// that condition's agent its configured name.
 fn condition_instruction_for_state(
     design: &HumaiPsyExpDesign,
     state: &ExperimentSessionState,
+    coop_name: &str,
     coop_prompt: &str,
+    argum_name: &str,
     argum_prompt: &str,
 ) -> String {
     let desc = current_trial_descriptor_from_state(design, state);
     let condition = humaipsy_core::experiment::condition_name(desc.condition_index);
+    let name = agent_name_for_condition(condition, coop_name, argum_name);
+    let prompt = match condition {
+        "ARGUM" => argum_prompt,
+        _ => coop_prompt,
+    };
 
-    match condition {
-        "ARGUM" => argum_prompt.to_string(),
-        _ => coop_prompt.to_string(),
-    }
+    format!("Your name in this conversation is {name}.\n\n{prompt}")
 }
 
 fn design_snapshot(design: &HumaiPsyExpDesign) -> ExperimentDesignSnapshot {
@@ -250,7 +286,9 @@ fn assistant_prompt_for_current_condition(
         condition_instruction_for_state(
             design,
             session,
+            &app.coop_agent_name,
             &app.coop_agent_prompt,
+            &app.argum_agent_name,
             &app.argum_agent_prompt,
         )
     )
@@ -263,6 +301,11 @@ fn advance_to_next_trial(
     timed_out: bool,
 ) {
     let was_running = humaipsy_core::timer::main_timer_is_running();
+    // `session.running` stays true while the clock is paused, so this is what
+    // distinguishes "advance a live experiment" from "preview the next trial
+    // before starting". A live experiment gets a fresh clock on the new trial;
+    // leaving it at the previous trial's accumulated time would under-count it.
+    let experiment_active = state.session.running;
 
     if !state.session.configured {
         append_message_to_chat_and_store(
@@ -348,7 +391,7 @@ fn advance_to_next_trial(
         },
     );
 
-    if was_running {
+    if was_running || experiment_active {
         humaipsy_core::timer::stop_and_reset_main_timer();
         humaipsy_core::timer::start_main_timer();
     }
@@ -494,24 +537,164 @@ fn submit_final_answer(app: &HumaiPsy, state: &mut OverviewChatUiState, store: &
     finalize_experiment(app, state, store);
 }
 
-fn copy_experiment_csv_to_desktop() -> Result<PathBuf, String> {
-    let source = experiment_csv::current_experiment_csv_path()
-        .ok_or_else(|| "No experiment CSV file found.".to_string())?;
-    // Windows sets USERPROFILE (not HOME); fall back to it so the Desktop
-    // copy works the same way it does on Linux/macOS.
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map_err(|_| "Could not determine home directory (HOME/USERPROFILE not set).".to_string())?;
-    let desktop_dir = PathBuf::from(home).join("Desktop");
-    std::fs::create_dir_all(&desktop_dir)
-        .map_err(|err| format!("Failed to create Desktop folder: {err}"))?;
+/// The user's home folder, with the platform-appropriate variable first.
+fn home_directory() -> Result<PathBuf, String> {
+    // Windows sets USERPROFILE (not HOME); prefer it there so a leftover HOME
+    // from a POSIX shell cannot silently redirect the copy. Other platforms use
+    // HOME first, with USERPROFILE as the same fallback the rest of the app uses.
+    let home = if cfg!(windows) {
+        std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME"))
+    } else {
+        std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))
+    }
+    .map_err(|_| "Could not determine home directory (HOME/USERPROFILE not set).".to_string())?;
+    Ok(PathBuf::from(home))
+}
+
+/// The folder the "Save to Desktop" button should use.
+fn desktop_directory() -> Result<PathBuf, String> {
+    let home = home_directory()?;
+
+    // OneDrive Known Folder Move can put the visible Desktop under the OneDrive
+    // root; prefer that when it actually exists.
+    if let Ok(one_drive) = std::env::var("OneDrive") {
+        let candidate = PathBuf::from(one_drive).join("Desktop");
+        if candidate.is_dir() {
+            return Ok(candidate);
+        }
+    }
+
+    Ok(home.join("Desktop"))
+}
+
+/// Fallback when the Desktop is not writable (Controlled Folder Access, a locked
+/// down profile, antivirus). Downloads is not protected by CFA by default.
+fn downloads_directory() -> Result<PathBuf, String> {
+    Ok(home_directory()?.join("Downloads"))
+}
+
+/// The path for copy number `number`: `Exp001.csv`, then `Exp001 (2).csv`, ...
+fn numbered_copy_path(directory: &Path, file_name: &Path, number: u32) -> PathBuf {
+    if number == 1 {
+        return directory.join(file_name);
+    }
+    let stem = file_name
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("experiment");
+    match file_name.extension().and_then(|extension| extension.to_str()) {
+        Some(extension) if !extension.is_empty() => {
+            directory.join(format!("{stem} ({number}).{extension}"))
+        }
+        _ => directory.join(format!("{stem} ({number})")),
+    }
+}
+
+/// Clear the read-only flag on `path` without making a Unix file world-writable.
+#[cfg(windows)]
+#[allow(clippy::permissions_set_readonly_false)] // correct Windows API; the lint targets Unix mode bits
+fn make_writable(path: &Path) -> std::io::Result<()> {
+    let mut permissions = std::fs::metadata(path)?.permissions();
+    permissions.set_readonly(false);
+    std::fs::set_permissions(path, permissions)
+}
+
+#[cfg(unix)]
+fn make_writable(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = std::fs::metadata(path)?.permissions();
+    // Add owner write, preserving every other mode bit. `set_readonly(false)`
+    // would set 0o666 on Unix and make the file world-writable.
+    permissions.set_mode(permissions.mode() | 0o200);
+    std::fs::set_permissions(path, permissions)
+}
+
+/// Copy `source` into `directory`, keeping its filename.
+///
+/// A pre-existing read-only destination makes `fs::copy` fail with "Access is
+/// denied. (os error 5)" on Windows, so clear that attribute and retry. If the
+/// name is still unwritable (typically because the file is open in Excel), save
+/// a numbered copy beside it instead of failing the whole save.
+fn copy_csv_into_directory(source: &Path, directory: &Path) -> Result<PathBuf, String> {
     let file_name = source
         .file_name()
         .ok_or_else(|| "Invalid experiment CSV path.".to_string())?;
-    let destination = desktop_dir.join(file_name);
-    std::fs::copy(&source, &destination)
-        .map_err(|err| format!("Failed to copy CSV to Desktop: {err}"))?;
-    Ok(destination)
+    let file_name = Path::new(file_name);
+
+    let destination = numbered_copy_path(directory, file_name, 1);
+    let last_error = match std::fs::copy(source, &destination) {
+        Ok(_) => return Ok(destination),
+        Err(error) => error,
+    };
+
+    // Read-only destination: clear the attribute and retry the same name once.
+    if let Ok(metadata) = std::fs::metadata(&destination)
+        && metadata.permissions().readonly()
+        && make_writable(&destination).is_ok()
+        && std::fs::copy(source, &destination).is_ok()
+    {
+        return Ok(destination);
+    }
+
+    // Locked name (for example, the CSV is open in a spreadsheet): use the
+    // first free numbered name. If that also fails, the directory itself is
+    // unwritable, so there is no point trying (3)..(99).
+    for number in 2..=99 {
+        let candidate = numbered_copy_path(directory, file_name, number);
+        if candidate.exists() {
+            continue;
+        }
+        return match std::fs::copy(source, &candidate) {
+            Ok(_) => Ok(candidate),
+            Err(error) => Err(format!(
+                "Failed to copy CSV to {}: {error}",
+                candidate.display()
+            )),
+        };
+    }
+
+    Err(format!(
+        "Failed to copy CSV to {}: {last_error}",
+        destination.display()
+    ))
+}
+
+fn copy_csv_with_fallback(
+    source: &Path,
+    primary: &Path,
+    fallback: &Path,
+) -> Result<(PathBuf, bool), String> {
+    let primary_result = std::fs::create_dir_all(primary)
+        .map_err(|error| format!("create {}: {error}", primary.display()))
+        .and_then(|()| copy_csv_into_directory(source, primary));
+
+    match primary_result {
+        Ok(path) => Ok((path, false)),
+        Err(primary_error) => {
+            if std::fs::create_dir_all(fallback).is_ok()
+                && let Ok(path) = copy_csv_into_directory(source, fallback)
+            {
+                return Ok((path, true));
+            }
+
+            Err(format!(
+                "Could not save to {} ({primary_error}). The experiment CSV is still at {}. \
+                 If Windows is blocking Desktop writes, allow HumaiPsy in Controlled Folder Access \
+                 or copy the file manually.",
+                primary.display(),
+                source.display()
+            ))
+        }
+    }
+}
+
+fn copy_experiment_csv_to_desktop() -> Result<(PathBuf, bool), String> {
+    let source = experiment_csv::current_experiment_csv_path()
+        .ok_or_else(|| "No experiment CSV file found.".to_string())?;
+    let desktop_dir = desktop_directory()?;
+    let downloads_dir = downloads_directory()?;
+    copy_csv_with_fallback(&source, &desktop_dir, &downloads_dir)
 }
 
 fn render_experiment_finished_popup(ctx: &egui::Context, state: &mut OverviewChatUiState) {
@@ -532,7 +715,7 @@ fn render_experiment_finished_popup(ctx: &egui::Context, state: &mut OverviewCha
         .resizable(false)
         .movable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .fixed_size(egui::vec2(380.0, 180.0))
+        .fixed_size(egui::vec2(440.0, 230.0))
         .open(&mut open)
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
@@ -550,14 +733,26 @@ fn render_experiment_finished_popup(ctx: &egui::Context, state: &mut OverviewCha
                 });
                 if !state.finished_popup_status.is_empty() {
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new(state.finished_popup_status.as_str()).small().weak());
+                    egui::ScrollArea::vertical()
+                        .max_height(80.0)
+                        .show(ui, |ui| {
+                            ui.set_max_width(ui.available_width());
+                            ui.label(
+                                egui::RichText::new(state.finished_popup_status.as_str())
+                                    .small()
+                                    .weak(),
+                            );
+                        });
                 }
             });
         });
 
     if download_clicked {
         state.finished_popup_status = match copy_experiment_csv_to_desktop() {
-            Ok(path) => format!("Saved to {}", path.display()),
+            Ok((path, true)) => {
+                format!("Desktop was not writable; saved to {}", path.display())
+            }
+            Ok((path, false)) => format!("Saved to {}", path.display()),
             Err(err) => err,
         };
     }
@@ -645,6 +840,13 @@ fn spawn_ollama_opening_question(
     let store_path = chat_db_path(app);
     let ollama_host = app.ollama_host.clone();
     let assistant_prompt = assistant_prompt_for_current_condition(app, design, session);
+    let agent_name = current_agent_name(
+        design,
+        session,
+        &app.coop_agent_name,
+        &app.argum_agent_name,
+    )
+    .to_string();
     let history_size = app.conversation_history_size;
     let trace_context =
         inference_trace_context(session, "overview_chat.humai_agent.opening_question");
@@ -672,7 +874,7 @@ fn spawn_ollama_opening_question(
                 );
                 ChatMessage {
                     content: agent_reply.text.trim_end().to_string(),
-                    from: Some("Assistant".to_string()),
+                    from: Some(agent_name),
                     correlation: None,
                     source: MessageSource::Api,
                     api_auto_respond: false,
@@ -758,6 +960,10 @@ fn start_experiment_from_play(app: &HumaiPsy, store: &Store, state: &mut Overvie
         return;
     }
 
+    // A new experiment always starts a fresh clock. Resume-after-pause is the
+    // separate path in the Play button handler, which deliberately keeps the
+    // accumulated time; starting here must not inherit a previous run's total.
+    humaipsy_core::timer::stop_and_reset_main_timer();
     humaipsy_core::timer::start_main_timer();
 
     let topic = state.exp_design.topic.trim().to_string();
@@ -819,6 +1025,14 @@ fn start_experiment_from_play(app: &HumaiPsy, store: &Store, state: &mut Overvie
     );
 }
 
+/// The condition the first trial uses. The sequence alternates from there.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum StartCondition {
+    #[default]
+    Condition1,
+    Condition2,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct HumaiPsyExpDesign {
     pub name: String,
@@ -830,6 +1044,7 @@ pub(crate) struct HumaiPsyExpDesign {
     pub trial_seconds: u32,
     pub topic: String,
     pub question: String,
+    pub start_condition: StartCondition,
 }
 
 impl Default for HumaiPsyExpDesign {
@@ -842,8 +1057,9 @@ impl Default for HumaiPsyExpDesign {
             conditions: 2,
             trials: 2,
             trial_seconds: 120,
-            topic: "Mental Health".to_string(),
+            topic: "Ceramics and Pottery".to_string(),
             question: "Are you happy?".to_string(),
+            start_condition: StartCondition::Condition1,
         }
     }
 }
@@ -1116,6 +1332,75 @@ pub(crate) fn render_experiment_modals(ctx: &egui::Context, state: &mut Overview
     render_experiment_finished_popup(ctx, state);
 }
 
+/// Render one chat message, interpreting inline `**bold**` Markdown.
+///
+/// egui's bundled proportional font has a single weight (Ubuntu-Light), and the
+/// Catppuccin theme maps `strong_text_color` to the ordinary text colour, so
+/// `RichText::strong()` would show no visible emphasis at all. Bold runs are
+/// therefore painted twice with a subpixel offset, which thickens only those
+/// glyphs; everything else is left for `Label` to wrap as usual.
+fn chat_message_label(ui: &mut egui::Ui, content: &str) {
+    if !content.contains("**") {
+        ui.add(egui::Label::new(content).wrap());
+        return;
+    }
+
+    let segments = humaipsy_core::markdown::inline_segments(content);
+    if !segments.iter().any(|segment| segment.bold) {
+        ui.add(egui::Label::new(content).wrap());
+        return;
+    }
+
+    // Two layouts of the same text: `plain` hides the bold runs, `bold` hides
+    // the rest. Colour does not affect layout, so both galleys have identical
+    // geometry and can be overlaid at the same position.
+    let plain = message_layout_job(ui, &segments, false);
+    let bold = message_layout_job(ui, &segments, true);
+    let plain = ui.fonts_mut(|fonts| fonts.layout_job(plain));
+    let bold = ui.fonts_mut(|fonts| fonts.layout_job(bold));
+
+    let (rect, _) = ui.allocate_exact_size(plain.size(), egui::Sense::hover());
+    let painter = ui.painter();
+    let color = ui.visuals().text_color();
+    painter.galley(rect.min, plain, color);
+    painter.galley(rect.min, bold.clone(), color);
+    // The second pass is what makes the run visually heavier than regular text.
+    // Offset by exactly one *physical* pixel (egui snaps text to physical
+    // pixels), so the thickening is guaranteed and identical at any DPI scale.
+    let one_pixel = 1.0 / ui.ctx().pixels_per_point().max(0.1);
+    painter.galley(rect.min + egui::vec2(one_pixel, 0.0), bold, color);
+}
+
+fn message_layout_job(
+    ui: &egui::Ui,
+    segments: &[humaipsy_core::markdown::InlineSegment],
+    bold_pass: bool,
+) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = ui.available_width().max(1.0);
+    let color = ui.visuals().text_color();
+    let font_id = egui::TextStyle::Body.resolve(ui.style());
+
+    for segment in segments {
+        let visible = segment.bold == bold_pass;
+        job.append(
+            &segment.text,
+            0.0,
+            egui::TextFormat {
+                font_id: font_id.clone(),
+                color: if visible {
+                    color
+                } else {
+                    egui::Color32::TRANSPARENT
+                },
+                ..Default::default()
+            },
+        );
+    }
+
+    job
+}
+
 fn render_chat_rectangle(
     app: &mut HumaiPsy,
     ui: &mut egui::Ui,
@@ -1152,8 +1437,13 @@ fn render_chat_rectangle(
                         .stroke(bar_stroke)
                         .inner_margin(egui::Margin::symmetric(8, 0))
                         .show(ui, |ui| {
-                            let status_label =
+                            let timer_running =
+                                humaipsy_core::timer::main_timer_is_running();
+                            let mut status_label =
                                 experiment_status_label(&state.exp_design, &state.session);
+                            if state.session.running && !timer_running {
+                                status_label.push_str(" (paused)");
+                            }
 
                             ui.allocate_ui_with_layout(
                                 egui::vec2(ui.available_width(), top_row_height),
@@ -1166,66 +1456,82 @@ fn render_chat_rectangle(
                                         let next_btn = egui::Button::new(">>").small();
                                         if ui
                                             .add_enabled(trial_navigation_enabled, next_btn)
-                                            .on_hover_text("Move to next trial")
+                                            .on_hover_text(
+                                                "Move to the next trial (advances the condition when this block ends)",
+                                            )
                                             .clicked()
                                         {
                                             advance_to_next_trial(app, store, state, false);
                                         }
 
                                         let stop_btn = egui::Button::new(
-                                            egui::RichText::new(regular::X)
+                                            egui::RichText::new("×")
                                                 .line_height(Some(ui.text_style_height(&egui::TextStyle::Body))),
                                         )
                                         .small();
                                         if ui
                                             .add_enabled(trial_navigation_enabled, stop_btn)
-                                            .on_hover_text("Stop timer and reset to 00:00:00")
+                                            .on_hover_text("Stop the experiment and reset the timer to 00:00:00")
                                             .clicked()
                                         {
                                             humaipsy_core::timer::stop_and_reset_main_timer();
                                             end_trial(false);
                                             end_experiment();
                                             state.session.running = false;
+                                            state.session.configured = false;
                                             state.session.trial_index = 0;
                                             state.session.trial_memory_start_idx = 0;
                                             state.session.trial_timeout_popup_open = false;
                                             state.session.awaiting_final_answer = false;
                                             state.session.finished_popup_open = false;
                                             state.session.experiment_complete = false;
+                                            update_web_status(app, state);
                                         }
 
                                         let pause_btn = egui::Button::new(
-                                            egui::RichText::new(regular::PAUSE)
+                                            egui::RichText::new("⏸")
                                                 .line_height(Some(ui.text_style_height(&egui::TextStyle::Body))),
                                         )
                                         .small();
                                         if ui
                                             .add_enabled(
-                                                trial_navigation_enabled
-                                                    && humaipsy_core::timer::main_timer_is_running(),
+                                                trial_navigation_enabled && timer_running,
                                                 pause_btn,
                                             )
-                                            .on_hover_text("Pause timer")
+                                            .on_hover_text("Pause the timer (Play resumes from the same time)")
                                             .clicked()
                                         {
                                             humaipsy_core::timer::pause_main_timer();
+                                            update_web_status(app, state);
                                         }
 
                                         let play_btn = egui::Button::new(
-                                            egui::RichText::new(regular::PLAY)
+                                            egui::RichText::new("▶")
                                                 .line_height(Some(ui.text_style_height(&egui::TextStyle::Body))),
                                         )
                                         .small();
+                                        let play_hover = if state.session.running {
+                                            "Resume the paused timer"
+                                        } else {
+                                            "Start the experiment"
+                                        };
                                         if ui
                                             .add_enabled(
-                                                !state.session.awaiting_final_answer
-                                                    && !humaipsy_core::timer::main_timer_is_running(),
+                                                !state.session.awaiting_final_answer && !timer_running,
                                                 play_btn,
                                             )
-                                            .on_hover_text("Start timer")
+                                            .on_hover_text(play_hover)
                                             .clicked()
                                         {
-                                            start_experiment_from_play(app, store, state);
+                                            if state.session.running {
+                                                // Pause only stops the clock; the experiment and its
+                                                // run are still live, so Play must resume the timer
+                                                // instead of trying to start a second experiment.
+                                                humaipsy_core::timer::start_main_timer();
+                                                update_web_status(app, state);
+                                            } else {
+                                                start_experiment_from_play(app, store, state);
+                                            }
                                         }
                                     });
                                 },
@@ -1299,12 +1605,36 @@ fn render_chat_rectangle(
                                                                 .inner_margin(egui::Margin::symmetric(8, 4))
                                                                 .show(ui, |ui| {
                                                                     ui.set_max_width(ui.available_width());
-                                                                    ui.with_layout(
-                                                                        egui::Layout::left_to_right(egui::Align::Min),
-                                                                        |ui| {
-                                                                            ui.add(egui::Label::new(&msg.content).wrap());
-                                                                        },
-                                                                    );
+                                                                    let sender = if msg.source
+                                                                        == MessageSource::System
+                                                                    {
+                                                                        None
+                                                                    } else {
+                                                                        msg.from
+                                                                            .as_deref()
+                                                                            .filter(|name| {
+                                                                                !name.trim().is_empty()
+                                                                            })
+                                                                    };
+                                                                    ui.vertical(|ui| {
+                                                                        if let Some(sender) = sender {
+                                                                            ui.label(
+                                                                                egui::RichText::new(sender)
+                                                                                    .small()
+                                                                                    .strong(),
+                                                                            );
+                                                                            ui.add_space(2.0);
+                                                                        }
+                                                                        ui.with_layout(
+                                                                            egui::Layout::left_to_right(egui::Align::Min),
+                                                                            |ui| {
+                                                                                if sender.is_some() {
+                                                                                    ui.add_space(4.0);
+                                                                                }
+                                                                                chat_message_label(ui, &msg.content);
+                                                                            },
+                                                                        );
+                                                                    });
                                                                 });
                                                         },
                                                     );
@@ -1362,9 +1692,17 @@ fn render_chat_rectangle(
                         let message_text = state.chat.input_text.trim().to_string();
                         state.chat.input_text.clear();
 
+                        let participant_label = {
+                            let participant_id = state.exp_design.participant_id.trim();
+                            if participant_id.is_empty() {
+                                "Human".to_string()
+                            } else {
+                                participant_id.to_string()
+                            }
+                        };
                         let user_message = ChatMessage {
                             content: message_text.clone(),
-                            from: Some("Human".to_string()),
+                            from: Some(participant_label),
                             correlation: None,
                             source: MessageSource::Human,
                             api_auto_respond: false,
@@ -1395,6 +1733,13 @@ fn render_chat_rectangle(
                         let ollama_host = app.ollama_host.clone();
                         let assistant_prompt =
                             assistant_prompt_for_current_condition(app, &state.exp_design, &state.session);
+                        let agent_name = current_agent_name(
+                            &state.exp_design,
+                            &state.session,
+                            &app.coop_agent_name,
+                            &app.argum_agent_name,
+                        )
+                        .to_string();
                         let history_size = app.conversation_history_size;
                         let trace_context =
                             inference_trace_context(&state.session, "overview_chat.humai_agent.reply");
@@ -1437,7 +1782,7 @@ fn render_chat_rectangle(
                                         );
                                         ChatMessage {
                                             content: agent_reply.text.trim_end().to_string(),
-                                            from: Some("Assistant".to_string()),
+                                            from: Some(agent_name),
                                             correlation: None,
                                             source: MessageSource::Api,
                                             api_auto_respond: false,
@@ -1517,7 +1862,7 @@ fn render_right_bar(
                 ui.separator();
                 ui.add_space(4.0);
 
-                let columns_height = 300.0;
+                let columns_height = 440.0;
 
                 let total_width = ui.available_width();
                 let left_width = 200.0;
@@ -1725,7 +2070,7 @@ fn render_right_bar(
                                     egui::ScrollArea::vertical()
                                         .max_height(columns_height)
                                         .show(ui, |ui| {
-                                    ui.label(egui::RichText::new("Experimental Design Agent").strong().size(16.0));
+                                    ui.label(egui::RichText::new("Experimental Design Agents").strong().size(16.0));
                                     ui.separator();
                                     ui.label(
                                         egui::RichText::new(
@@ -1736,6 +2081,17 @@ fn render_right_bar(
                                     );
                                     ui.add_space(6.0);
 
+                                    ui.horizontal(|ui| {
+                                        ui.label("Cooperative Name:");
+                                        let name_width = ui.available_width();
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut app.coop_agent_name)
+                                                .hint_text(DEFAULT_COOP_AGENT_NAME)
+                                                .desired_width(name_width),
+                                        );
+                                    });
+
+                                    ui.add_space(4.0);
                                     ui.label("Cooperative prompt:");
                                     ui.add(
                                         egui::TextEdit::multiline(&mut app.coop_agent_prompt)
@@ -1744,11 +2100,59 @@ fn render_right_bar(
                                     );
 
                                     ui.add_space(8.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label("Argumentative Name:");
+                                        let name_width = ui.available_width();
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut app.argum_agent_name)
+                                                .hint_text(DEFAULT_ARGUM_AGENT_NAME)
+                                                .desired_width(name_width),
+                                        );
+                                    });
+
+                                    ui.add_space(4.0);
                                     ui.label("Argumentative prompt:");
                                     ui.add(
                                         egui::TextEdit::multiline(&mut app.argum_agent_prompt)
                                             .desired_width(f32::INFINITY)
                                             .desired_rows(4),
+                                    );
+
+                                    ui.add_space(8.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label("Randomisation Condition:");
+                                        ui.add_enabled_ui(
+                                            state.exp_design.conditions > 1
+                                                && !state.session.running,
+                                            |ui| {
+                                                egui::ComboBox::from_id_salt(
+                                                    "randomisation_condition_selector",
+                                                )
+                                                .selected_text(match state.exp_design.start_condition {
+                                                    StartCondition::Condition1 => "Condition 1",
+                                                    StartCondition::Condition2 => "Condition 2",
+                                                })
+                                                .show_ui(ui, |ui| {
+                                                    ui.selectable_value(
+                                                        &mut state.exp_design.start_condition,
+                                                        StartCondition::Condition1,
+                                                        "Condition 1",
+                                                    );
+                                                    ui.selectable_value(
+                                                        &mut state.exp_design.start_condition,
+                                                        StartCondition::Condition2,
+                                                        "Condition 2",
+                                                    );
+                                                });
+                                            },
+                                        );
+                                    });
+                                    ui.label(
+                                        egui::RichText::new(
+                                            "The condition that speaks first; conditions alternate from there.",
+                                        )
+                                        .small()
+                                        .weak(),
                                     );
                                     });
                                 });
@@ -1832,5 +2236,232 @@ fn render_participant_id_modal(ctx: &egui::Context, state: &mut OverviewChatUiSt
     state.input_modal.open = is_open;
     if !is_open {
         state.input_modal.action = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two-pass bold renderer relies on layout being independent of colour:
+    /// the plain pass must make bold runs transparent and the bold pass must do
+    /// the opposite, with identical text and section boundaries.
+    #[test]
+    fn bold_layout_jobs_split_visible_and_hidden_runs() {
+        let ctx = egui::Context::default();
+        let mut laid_out = None;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let segments = humaipsy_core::markdown::inline_segments("a **b** c");
+            laid_out = Some((
+                message_layout_job(ui, &segments, false),
+                message_layout_job(ui, &segments, true),
+            ));
+        });
+        output.textures_delta.clear();
+
+        let (plain, bold) = laid_out.expect("both passes should be laid out");
+        assert_eq!(plain.text, "a b c");
+        assert_eq!(bold.text, "a b c");
+        assert_eq!(plain.sections.len(), 3);
+        assert_eq!(bold.sections.len(), 3);
+
+        // "a " and " c" are visible in the plain pass, "b" is hidden.
+        assert_ne!(plain.sections[0].format.color, egui::Color32::TRANSPARENT);
+        assert_eq!(plain.sections[1].format.color, egui::Color32::TRANSPARENT);
+        assert_ne!(plain.sections[2].format.color, egui::Color32::TRANSPARENT);
+
+        // The bold pass is the exact inverse, so overpainting it adds only bold glyphs.
+        assert_eq!(bold.sections[0].format.color, egui::Color32::TRANSPARENT);
+        assert_ne!(bold.sections[1].format.color, egui::Color32::TRANSPARENT);
+        assert_eq!(bold.sections[2].format.color, egui::Color32::TRANSPARENT);
+    }
+
+    #[test]
+    fn a_bold_message_paints_a_plain_pass_and_a_doubled_bold_pass() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            chat_message_label(ui, "I care about **aesthetics** a lot");
+        });
+        output.textures_delta.clear();
+
+        let text_shapes = output
+            .shapes
+            .iter()
+            .filter(|clipped| matches!(clipped.shape, egui::Shape::Text(_)))
+            .count();
+        assert_eq!(
+            text_shapes, 3,
+            "expected one normal pass plus two offset bold passes"
+        );
+    }
+
+    #[test]
+    fn default_design_topic_is_ceramics_and_pottery() {
+        assert_eq!(HumaiPsyExpDesign::default().topic, "Ceramics and Pottery");
+    }
+
+    fn temp_case_dir(label: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("test-tmp")
+            .join(format!("{label}-{}-{nonce}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory)
+            .unwrap_or_else(|error| panic!("create {}: {error}", directory.display()));
+        directory
+    }
+
+    #[test]
+    fn saving_over_a_read_only_csv_clears_the_attribute() {
+        let root = temp_case_dir("save-readonly");
+        let source_dir = root.join("source");
+        let desktop_dir = root.join("desktop");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&desktop_dir).unwrap();
+
+        let source = source_dir.join("Exp001.csv");
+        std::fs::write(&source, "new\n").unwrap();
+        let destination = desktop_dir.join("Exp001.csv");
+        std::fs::write(&destination, "old\n").unwrap();
+
+        let mut permissions = std::fs::metadata(&destination).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&destination, permissions).unwrap();
+
+        let saved = copy_csv_into_directory(&source, &desktop_dir).expect("copy should succeed");
+        assert_eq!(saved, destination);
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "new\n");
+
+        let _ = make_writable(&destination);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn saving_a_name_that_is_a_directory_uses_a_numbered_copy() {
+        let root = temp_case_dir("save-numbered");
+        let source_dir = root.join("source");
+        let desktop_dir = root.join("desktop");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(desktop_dir.join("Exp001.csv")).unwrap();
+
+        let source = source_dir.join("Exp001.csv");
+        std::fs::write(&source, "new\n").unwrap();
+
+        let saved = copy_csv_into_directory(&source, &desktop_dir).expect("copy should succeed");
+        assert_eq!(saved, desktop_dir.join("Exp001 (2).csv"));
+        assert_eq!(std::fs::read_to_string(&saved).unwrap(), "new\n");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn blank_agent_names_fall_back_to_the_default_labels() {
+        assert_eq!(
+            effective_agent_name("", DEFAULT_COOP_AGENT_NAME),
+            DEFAULT_COOP_AGENT_NAME
+        );
+        assert_eq!(
+            effective_agent_name("   ", DEFAULT_ARGUM_AGENT_NAME),
+            DEFAULT_ARGUM_AGENT_NAME
+        );
+        assert_eq!(
+            effective_agent_name(" Aster ", DEFAULT_COOP_AGENT_NAME),
+            "Aster"
+        );
+    }
+
+    #[test]
+    fn agent_name_for_condition_uses_the_configured_name() {
+        assert_eq!(
+            agent_name_for_condition("COOP", "", "Bolt"),
+            DEFAULT_COOP_AGENT_NAME
+        );
+        assert_eq!(agent_name_for_condition("ARGUM", "Aster", "Bolt"), "Bolt");
+        assert_eq!(
+            agent_name_for_condition("ARGUM", "Aster", "  "),
+            DEFAULT_ARGUM_AGENT_NAME
+        );
+    }
+
+    #[test]
+    fn selected_start_condition_changes_the_first_trial() {
+        let coop_first = HumaiPsyExpDesign::default();
+        assert_eq!(trial_descriptor(&coop_first, 0).condition_index, 0);
+        assert_eq!(trial_descriptor(&coop_first, 1).condition_index, 1);
+
+        let argum_first = HumaiPsyExpDesign {
+            start_condition: StartCondition::Condition2,
+            ..HumaiPsyExpDesign::default()
+        };
+        assert_eq!(trial_descriptor(&argum_first, 0).condition_index, 1);
+        assert_eq!(trial_descriptor(&argum_first, 1).condition_index, 0);
+    }
+
+    #[test]
+    fn saving_falls_back_when_the_desktop_is_not_writable() {
+        let root = temp_case_dir("save-fallback");
+        let source_dir = root.join("source");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        let source = source_dir.join("Exp001.csv");
+        std::fs::write(&source, "new\n").unwrap();
+
+        // A file where a directory is expected makes create_dir_all fail, which
+        // is how an unwritable Desktop looks to this code path.
+        let blocked = root.join("blocked");
+        std::fs::write(&blocked, "not a directory").unwrap();
+        let fallback = root.join("downloads");
+
+        let (saved, used_fallback) =
+            copy_csv_with_fallback(&source, &blocked, &fallback).expect("fallback copy");
+        assert!(used_fallback);
+        assert_eq!(saved, fallback.join("Exp001.csv"));
+        assert_eq!(std::fs::read_to_string(&saved).unwrap(), "new\n");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn condition_instructions_embed_the_current_agent_name() {
+        let design = HumaiPsyExpDesign::default();
+        let mut state = ExperimentSessionState::default();
+
+        let coop = condition_instruction_for_state(
+            &design,
+            &state,
+            "Aster",
+            "coop prompt",
+            "Bolt",
+            "argum prompt",
+        );
+        assert!(coop.contains("Your name in this conversation is Aster."));
+        assert!(coop.contains("coop prompt"));
+
+        // The default design alternates conditions each trial: index 1 is ARGUM.
+        state.trial_index = 1;
+        let argum = condition_instruction_for_state(
+            &design,
+            &state,
+            "Aster",
+            "coop prompt",
+            "Bolt",
+            "argum prompt",
+        );
+        assert!(argum.contains("Your name in this conversation is Bolt."));
+        assert!(argum.contains("argum prompt"));
+
+        state.trial_index = 0;
+        let blank = condition_instruction_for_state(
+            &design,
+            &state,
+            "",
+            "coop prompt",
+            "",
+            "argum prompt",
+        );
+        assert!(blank.contains(DEFAULT_COOP_AGENT_NAME));
     }
 }

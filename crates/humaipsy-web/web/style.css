@@ -130,6 +130,12 @@ main {
   margin-bottom: 3px;
 }
 
+/* Inline **bold** in a transcript: make sure it reads heavier than body text
+   even where a UI/serif fallback would otherwise be subtle. */
+.message .content strong {
+  font-weight: 700;
+}
+
 .message.source-human { background: var(--human-bg); }
 .message.source-api { background: var(--api-bg); }
 .message.source-system { background: var(--system-bg); color: var(--muted); font-style: italic; }

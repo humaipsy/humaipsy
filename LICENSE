@@ -1,3 +1,29 @@
+HumaiPsy — Security & license
+
+Copyright (C) 2026 Dr. Luís Arandas and Dr. Olga Sutskova.
+
+HumaiPsy is licensed under the GNU Affero General Public License, version 3
+only (AGPL-3.0-only) — see the full license text below.
+
+HumaiPsy is copyleft: you may run, study, change and share it, and a version you
+distribute or offer over a network must carry its source under the same license.
+That is deliberate — HumaiPsy is not to become a closed product on somebody
+else's bench. A commercial exception is available on request through the project
+repository.
+
+SECURITY.md describes the threat model, the network boundary, the vault, file
+permissions, and what HumaiPsy deliberately does not do. Please report a
+vulnerability privately as described there.
+
+The bundled typeface is Noto Emoji, under the SIL Open Font License 1.1; its
+licence text is in humaipsy/assets/NotoEmoji-OFL.txt. Third-party crates
+keep their own licenses (including MIT, Apache-2.0, BSD, ISC, Zlib,
+Unicode-3.0, MPL-2.0, BSL-1.0 and CC0-1.0), and the font is under OFL-1.1;
+none are relicensed by this notice.
+
+The HumaiPsy name and original source are the work of Luis and Olga.
+
+
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007
 

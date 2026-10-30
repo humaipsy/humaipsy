@@ -4,12 +4,12 @@ dist/
 
 # Only the workspace-root Cargo.lock is tracked; member crates must not
 # accumulate their own (can happen if cargo is invoked outside the workspace).
-apps/humai/Cargo.lock
+humaipsy/Cargo.lock
 
 .master_hash
 
 # Experiment CSV exports (per design file, e.g. metrics/Exp001.csv)
-apps/humai/metrics/*.csv
+humaipsy/metrics/*.csv
 timings.csv
 
 overview_chat_audit.jsonl

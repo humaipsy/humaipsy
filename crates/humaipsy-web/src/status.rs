@@ -4,7 +4,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
-/// A snapshot of "what's happening right now" in the desktop app. `apps/humaipsy`
+/// A snapshot of "what's happening right now" in the desktop app. `humaipsy`
 /// updates this at the same points it already tracks trial/session state (see
 /// `HumaiPsy::web_status`); the web server only ever reads it. Kept intentionally
 /// small and plainly serializable — this is a read-only status line, not a
@@ -34,7 +34,7 @@ pub fn new_shared_status() -> SharedWebStatus {
 
 /// Shared flag mirroring `MasterVault::is_unlocked()`. Starts `false`
 /// (fail-closed: treated as locked) until the desktop app explicitly syncs it
-/// on every frame — see `HumaiPsyApp::update` in `apps/humaipsy`. Locking the app
+/// on every frame — see `HumaiPsyApp::update` in `humaipsy`. Locking the app
 /// (the Settings "Lock" button) must stop the dashboard from serving the chat
 /// transcript just as surely as it blanks the desktop UI; without this, the
 /// dashboard would keep serving the last-known transcript over the network

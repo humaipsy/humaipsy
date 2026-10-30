@@ -92,10 +92,50 @@ impl HumaiPsy {
 
             ui.add_space(4.0);
 
-            ui.horizontal(|ui| {
-                ui.label("Ollama Inference Test:");
-                if ui.button("Ping Ollama").clicked() {
+            let test_busy = ui_state.ollama.test_running.load(Ordering::Relaxed);
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Ollama Connection Test:");
+                if ui
+                    .add_enabled(!test_busy, egui::Button::new("Ping Ollama"))
+                    .on_hover_text(
+                        "Fast health check: reads /api/version and /api/tags. \
+                         It never loads or runs a model.",
+                    )
+                    .clicked()
+                {
                     *ui_state.ollama.test_status.lock_recover() = "Pinging Ollama...".to_string();
+                    ui_state.ollama.test_running.store(true, Ordering::Relaxed);
+                    let ctx = ctx.clone();
+                    let handle = self.rt_handle.clone();
+                    let ollama_host = self.ollama_host.clone();
+                    let test_status = ui_state.ollama.test_status.clone();
+                    let test_running = ui_state.ollama.test_running.clone();
+                    handle.spawn(async move {
+                        match humaipsy_core::ollama::ping_ollama(ollama_host.as_str()).await {
+                            Ok(ping) => {
+                                *test_status.lock_recover() =
+                                    format!("Ollama reachable: {}", ping.summary());
+                            }
+                            Err(e) => {
+                                *test_status.lock_recover() = format!("Ollama ping failed: {e}");
+                            }
+                        }
+                        test_running.store(false, Ordering::Relaxed);
+                        ctx.request_repaint();
+                    });
+                }
+
+                if ui
+                    .add_enabled(!test_busy, egui::Button::new("Test inference"))
+                    .on_hover_text(
+                        "Sends one short chat request to the selected model. \
+                         This is slower than a ping: a model that is not already \
+                         loaded has to be read from disk first.",
+                    )
+                    .clicked()
+                {
+                    *ui_state.ollama.test_status.lock_recover() =
+                        "Testing Ollama inference...".to_string();
                     ui_state.ollama.test_running.store(true, Ordering::Relaxed);
                     let ctx = ctx.clone();
                     let handle = self.rt_handle.clone();
@@ -116,11 +156,11 @@ impl HumaiPsy {
                         {
                             Ok(_) => {
                                 *test_status.lock_recover() =
-                                    "Ollama API test succeeded.".to_string();
+                                    "Ollama inference test succeeded.".to_string();
                             }
                             Err(e) => {
                                 *test_status.lock_recover() =
-                                    format!("Ollama API test failed: {e}");
+                                    format!("Ollama inference test failed: {e}");
                             }
                         }
                         test_running.store(false, Ordering::Relaxed);
@@ -132,7 +172,7 @@ impl HumaiPsy {
             if ui_state.ollama.test_running.load(Ordering::Relaxed) {
                 ui.horizontal(|ui| {
                     ui.spinner();
-                    ui.label("Testing Ollama API...");
+                    ui.label("Testing Ollama...");
                 });
             }
 
@@ -199,10 +239,7 @@ impl HumaiPsy {
                     });
                     ui.label(
                         egui::RichText::new(
-                            "Shows the current chat transcript and experiment status. \
-                             Read-only — nothing on this page can control the app. \
-                             Bound to this machine only by default (HUMAIPSY_WEB_BIND to change, \
-                             HUMAIPSY_WEB_DISABLED=1 to turn it off).",
+                            "Shows the current chat transcript and experiment status.",
                         )
                         .small()
                         .weak(),

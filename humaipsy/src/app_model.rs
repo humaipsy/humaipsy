@@ -29,11 +29,19 @@ pub enum MainPanelTab {
     Settings,
 }
 
+/// Fallback names used when the Design tab's agent-name fields are blank.
+pub(crate) const DEFAULT_COOP_AGENT_NAME: &str = "NO_NAME_1";
+pub(crate) const DEFAULT_ARGUM_AGENT_NAME: &str = "NO_NAME_2";
+
 pub struct HumaiPsy {
     pub(crate) rt_handle: Handle,
     pub(crate) app_state: Arc<AppState>,
     pub(crate) selected_ollama_model: String,
     pub(crate) assistant_prompt: String,
+    /// Names the two experiment agents introduce themselves with; blank fields
+    /// fall back to `DEFAULT_COOP_AGENT_NAME` / `DEFAULT_ARGUM_AGENT_NAME`.
+    pub(crate) coop_agent_name: String,
+    pub(crate) argum_agent_name: String,
     pub(crate) coop_agent_prompt: String,
     pub(crate) argum_agent_prompt: String,
     pub(crate) conversation_history_size: usize,
@@ -104,6 +112,8 @@ impl HumaiPsy {
             assistant_prompt: humaipsy_core::env_compat::var("ASSISTANT_PROMPT").unwrap_or_else(|_| {
                 "You are HumaiPsyAgent, the experiment assistant for human-to-agent conversations. Be clear, neutral, and helpful. Keep responses concise and actionable when possible.".to_string()
             }),
+            coop_agent_name: DEFAULT_COOP_AGENT_NAME.to_string(),
+            argum_agent_name: DEFAULT_ARGUM_AGENT_NAME.to_string(),
             coop_agent_prompt,
             argum_agent_prompt,
             conversation_history_size: 5,

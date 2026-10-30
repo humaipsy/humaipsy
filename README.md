@@ -2,10 +2,10 @@
 
 <p align="center">
   <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white"></a>
+  <a href="https://github.com/emilk/egui"><img alt="egui 0.37" src="https://img.shields.io/badge/egui-0.37-blue"></a>
   <a href="LICENSE"><img alt="License: AGPL v3" src="https://img.shields.io/badge/License-AGPLv3-blue.svg"></a>
   <a href="https://github.com/humaipsy/humaipsy/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/humaipsy/humaipsy/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="Platform: Windows, macOS, Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue">
-  <img alt="JavaScript" src="https://img.shields.io/badge/JavaScript-F7DF1E?style=flat&logo=javascript&logoColor=black">
   <a href="https://humaipsy.github.io/humaipsy/"><img alt="Website" src="https://img.shields.io/badge/Website-humaipsy.github.io%2Fhumaipsy-blue"></a>
 </p>
 
@@ -14,10 +14,10 @@
 <p align="center">
   <table width="80%">
     <tr>
-      <td width="50%"><img src="./assets/panel_1.png" alt="HumaiPsy panel 1" width="100%"></td>
+      <td width="50%"><img src="./assets/img1.png" alt="HumaiPsy panel 1" width="100%"></td>
       <td width="50%">
-        <img src="./assets/panel_2.png" alt="HumaiPsy panel 2" width="100%"><br>
-        <img src="./assets/panel_3.png" alt="HumaiPsy panel 3" width="100%">
+        <img src="./assets/img2.png" alt="HumaiPsy panel 2" width="100%"><br>
+        <img src="./assets/img3.png" alt="HumaiPsy panel 3" width="100%">
       </td>
     </tr>
   </table>
@@ -32,7 +32,7 @@ Features:
 
 For how the app is put together (process model, module layout, storage formats, known limitations, and what's planned next) see [ARCHITECTURE.md](ARCHITECTURE.md). For contributor rules (build/run/test commands, cross-platform gotchas, release process) see [AGENTS.md](AGENTS.md). For what's actually protected (and what isn't) if you're handling real participant data, see [SECURITY.md](SECURITY.md).
 
-The engine (agent prompting, Ollama client, experiment recording, chat store, vault) lives in the `humaipsy-core` library crate with no UI dependency; `apps/humaipsy` is the `eframe`/`egui` desktop binary built on top of it. We also add a live viewer for a secondary screen.
+The engine (agent prompting, Ollama client, experiment recording, chat store, vault) lives in the `humaipsy-core` library crate with no UI dependency; `humaipsy` is the `eframe`/`egui` desktop binary built on top of it. We also add a live viewer for a secondary screen.
 
 <p align="center">
   <img src="./assets/live_view.png" alt="HumaiPsy live viewer" width="60%">
@@ -41,7 +41,7 @@ The engine (agent prompting, Ollama client, experiment recording, chat store, va
 ## Dependencies
 
 - Git (>= 2.30)
-- Rust toolchain (stable with Edition 2024 support; rustc >= 1.85)
+- Rust toolchain (stable with Edition 2024 support; rustc >= 1.95)
 - Cargo (bundled with Rust toolchain)
 - **Linux**: build-essential (or equivalent), pkg-config, and the X11/Wayland/audio
   dev headers eframe's windowing backend links against: `libxkbcommon-dev`,
@@ -55,7 +55,7 @@ The engine (agent prompting, Ollama client, experiment recording, chat store, va
 
 ## Components
 
-- [humaipsy](./apps/humaipsy/)
+- [humaipsy](./humaipsy/)
 - [humaipsy-web](./crates/humaipsy-web/)
 - [humaipsy-core](./crates/humaipsy-core/)
 
@@ -70,7 +70,7 @@ The engine (agent prompting, Ollama client, experiment recording, chat store, va
 ./scripts/run_app.sh
 
 # Manually
-cd ./apps/humaipsy
+cd ./humaipsy
 
 # Fast compile check (all bins and tests)
 cargo check --all-targets
@@ -78,7 +78,7 @@ cargo check --all-targets
 # Run app (UI only)
 cargo run
 
-# Run the helper binary to create/update vault/.master_hash (run from apps/humaipsy/)
+# Run the helper binary to create/update vault/.master_hash (run from humaipsy/)
 cargo run --bin gen_master_hash
 
 # Build release binary
@@ -103,7 +103,7 @@ cargo clippy --all-targets -- -D warnings
 scripts\run_app.bat
 
 # Manually
-cd ./apps/humaipsy
+cd ./humaipsy
 
 # Fast compile check (all bins and tests)
 cargo check --all-targets
@@ -111,7 +111,7 @@ cargo check --all-targets
 # Run app (UI only)
 cargo run
 
-# Run the helper binary to create/update vault/.master_hash (run from apps/humaipsy/)
+# Run the helper binary to create/update vault/.master_hash (run from humaipsy/)
 cargo run --bin gen_master_hash
 
 # Build release binary
@@ -136,7 +136,7 @@ cargo clippy --all-targets -- -D warnings
 ./scripts/run_app.sh
 
 # Manually
-cd ./apps/humaipsy
+cd ./humaipsy
 
 # Fast compile check (all bins and tests)
 cargo check --all-targets
@@ -144,7 +144,7 @@ cargo check --all-targets
 # Run app (UI only)
 cargo run
 
-# Run the helper binary to create/update vault/.master_hash (run from apps/humaipsy/)
+# Run the helper binary to create/update vault/.master_hash (run from humaipsy/)
 cargo run --bin gen_master_hash
 
 # Build release binary

@@ -2,12 +2,13 @@
 //! (CSV + JSONL event ledger), the chat SQLite store, and the master-password
 //! vault. Deliberately has no dependency on `egui`/`eframe` — this is what lets
 //! the engine be exercised headlessly (unit tests, a future CLI runner, a future
-//! HTTP API) without booting a GUI window. UI rendering lives in `apps/humaipsy`.
+//! HTTP API) without booting a GUI window. UI rendering lives in `humaipsy`.
 
 pub mod agent;
 pub mod chat_types;
 pub mod env_compat;
 pub mod experiment;
+pub mod markdown;
 #[path = "recording/metrics.rs"]
 pub mod metrics;
 pub mod ollama;

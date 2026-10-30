@@ -6,8 +6,8 @@
 //! that reads the same SQLite chat `Store` the desktop app already writes to.
 //! There is no write path: nothing served here can change experiment state.
 //!
-//! Depends only on `humaipsy-core`, not on `apps/humaipsy`, so it can in principle
-//! run standalone later even though today it's always spawned embedded.
+//! Depends only on `humaipsy-core`, not on the `humaipsy` desktop crate, so it can in
+//! principle run standalone later even though today it's always spawned embedded.
 
 mod routes;
 pub mod status;

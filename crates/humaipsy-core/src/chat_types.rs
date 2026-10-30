@@ -1,6 +1,6 @@
 //! Pure chat/message data types shared by the SQLite [`crate::store::Store`] and the
 //! UI layer. No rendering dependency lives here — anything that needs `egui::Ui`
-//! belongs in the `apps/humaipsy` UI crate instead.
+//! belongs in the `humaipsy` UI crate instead.
 
 use std::sync::mpsc::{self, Receiver, Sender};
 

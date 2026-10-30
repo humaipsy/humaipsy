@@ -1,9 +1,9 @@
 [package]
 name = "humaipsy-core"
 description = "HumaiPsy's engine: agent prompting, Ollama client, experiment recording, chat store, vault. No UI dependency."
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 license = "AGPL-3.0-only"
 
 [dependencies]

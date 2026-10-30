@@ -8,9 +8,9 @@ canonical reference; the project keeps no second agent guide.
 HumaiPsy is a cross-platform (Windows + Linux + macOS) desktop application for running
 Human-AI Interaction / HCI experiments. It's a three-crate Cargo workspace:
 `humaipsy-core` is a UI-free library (agent prompting, the Ollama client, experiment
-recording, the chat SQLite store, the master-password vault); `apps/humaipsy` is the
+recording, the chat SQLite store, the master-password vault); `humaipsy` is the
 `eframe`/`egui` desktop binary built on top of it; `humaipsy-web` is a small local
-read-only browser dashboard, spawned by `apps/humaipsy` in-process, that serves plain
+read-only browser dashboard, spawned by `humaipsy` in-process, that serves plain
 HTML/JS/CSS plus a JSON API reading the same chat `Store`. The app talks to a local
 or remote [Ollama](https://ollama.com) server for model inference, and records
 experiment trials to CSV plus a mirrored JSONL event ledger plus a local SQLite chat
@@ -32,7 +32,7 @@ whether this tool is safe to use with real participant data.
 ## Repository layout
 
 ```
-Cargo.toml                       # workspace root, members = ["apps/humaipsy", "crates/humaipsy-core", "crates/humaipsy-web"]
+Cargo.toml                       # workspace root, members = ["humaipsy", "crates/humaipsy-core", "crates/humaipsy-web"]
 crates/humaipsy-core/                 # library crate — zero egui/eframe dependency
   Cargo.toml
   src/
@@ -41,11 +41,14 @@ crates/humaipsy-core/                 # library crate — zero egui/eframe depen
                                        #   provider::Provider::chat (not ollama:: directly)
     chat_types.rs                      # ChatMessage/Room/MessageSource/AssistantGeneration/
                                        #   MessageCorrelation/UiInbox — shared by store.rs and
-                                       #   apps/humaipsy's ChatExample (which does the egui rendering)
+                                       #   humaipsy's ChatExample (which does the egui rendering)
     experiment/                          # pure trial-sequencing/counterbalancing engine —
                                        #   parameterized, unit-tested, no process-global state.
-                                       #   apps/humaipsy/src/ui/overview_chat/panel.rs delegates its
+                                       #   humaipsy/src/ui/overview_chat/panel.rs delegates its
                                        #   condition/trial math here instead of hardcoding it.
+    markdown.rs                           # Minimal inline Markdown for chat content (**bold**
+                                       #   only, unmatched markers kept literal) — pure and
+                                       #   unit-tested; humaipsy-web mirrors the same rules in JS
     provider/                              # backend-agnostic chat-completion trait +
                                        #   token budgeting. ollama_provider.rs is the only
                                        #   impl today — see "Adding a new provider" below.
@@ -61,17 +64,17 @@ crates/humaipsy-core/                 # library crate — zero egui/eframe depen
     timer.rs                                    # trial countdown timer used by the experiment UI
     vault.rs                                     # master-password gate (Argon2id) — no
                                        #   egui/UI dependency (rendering lives in
-                                       #   apps/humaipsy/src/ui/vault_panel.rs; keep it that way)
+                                       #   humaipsy/src/ui/vault_panel.rs; keep it that way)
 crates/humaipsy-web/                  # library crate — local read-only browser dashboard
-  Cargo.toml                        # depends on humaipsy-core only, not apps/humaipsy
+  Cargo.toml                        # depends on humaipsy-core only, not the humaipsy app
   web/                                # plain HTML/JS/CSS, no build step — embedded via include_str!
                                      #   (routes.rs), not served from a filesystem path at runtime
   src/
     lib.rs                              # `pub async fn serve(WebServerConfig)`, spawned by
-                                       #   apps/humaipsy onto its existing Tokio runtime
-    status.rs                            # WebStatusSnapshot + the Arc<Mutex<..>> apps/humaipsy writes into
+                                       #   humaipsy onto its existing Tokio runtime
+    status.rs                            # WebStatusSnapshot + the Arc<Mutex<..>> humaipsy writes into
     routes.rs                             # GET /, /api/status, /api/messages (reads humaipsy_core::store::Store)
-apps/humaipsy/                      # the UI binary — depends on humaipsy-core and humaipsy-web as path dependencies
+humaipsy/                      # the UI binary — depends on humaipsy-core and humaipsy-web as path dependencies
   Cargo.toml                        # package manifest (version is the release version, e.g. 0.1.3)
   .cargo/config.toml                 # target-dir = "target" so `cargo` works from this dir without -p
   build.rs                            # Windows-only: generates the .ico and embeds it as a resource
@@ -83,8 +86,10 @@ apps/humaipsy/                      # the UI binary — depends on humaipsy-core
     app_state.rs                             # `AppState`: shared, lockable runtime config (metrics)
     window_icon.rs                            # platform-split: Win32 SendMessage icons vs egui IconData
     ui/                                        # egui panels: settings, design, overview chat, vault unlock UI
-      mod.rs                                    # HumaiPsyUiState also holds the persisted egui_tiles::Tree
-                                       #   for the Overview tab's resizable sidebar/chat split
+      mod.rs                                    # HumaiPsyApp (eframe::App::ui) + HumaiPsyUiState
+                                       #   (OllamaUiState + OverviewChatUiState)
+      theme.rs                                  # Catppuccin palette + egui Visuals mapping
+                                       #   (local; catppuccin-egui stops at egui 0.33)
       overview_chat/                             # experiment engine UI + chat rendering (largest module,
                                        #   panel.rs is ~2k lines) — see "Known state-management debt" below
       vault_panel.rs                              # renders MasterVault; the only file that may import egui
@@ -117,12 +122,12 @@ that's ever needed. The Linux row pins `ubuntu-22.04` deliberately: the glibc an
 links against is the oldest machine that can run it.
 
 There is no separate staging step and no `dist/` folder to assemble. Everything the app
-draws is compiled in — `apps/humaipsy/assets/*.png` and the Noto emoji font via
+draws is compiled in — `humaipsy/assets/*.png` and the Noto emoji font via
 `include_bytes!`, `humaipsy-web`'s HTML/CSS/JS via `include_str!` — so a plain
 `cargo build --release` produces the same binary the release archives carry. The only
 thing a user adds beside it is their own `vault/.master_hash`.
 
-## `humaipsy-core` / `apps/humaipsy` / `humaipsy-web`: where new code goes
+## `humaipsy-core` / `humaipsy` / `humaipsy-web`: where new code goes
 
 - **If it doesn't need `egui`/`eframe`, it belongs in `humaipsy-core`.** Business logic
   (prompt construction, trial sequencing, recording, the chat store, the vault) lives
@@ -130,19 +135,20 @@ thing a user adds beside it is their own `vault/.master_hash`.
   depend on it without pulling in a GUI toolkit. `crates/humaipsy-core/src/experiment/mod.rs`
   is the reference example: pure functions taking their inputs as parameters, no
   `OnceLock`/global state, straightforward to test.
-- **If it renders (`egui::Ui`, `egui::Context`, ...), it belongs in `apps/humaipsy`.**
-  `apps/humaipsy/src/ui/overview_chat/chat.rs`'s `ChatExample` is the reference example
+- **If it renders (`egui::Ui`, `egui::Context`, ...), it belongs in `humaipsy`.**
+  `humaipsy/src/ui/overview_chat/chat.rs`'s `ChatExample` is the reference example
   of the seam: the pure data types it operates on (`ChatMessage`, `Room`, ...) live in
   `humaipsy_core::chat_types`, but `ChatExample` itself and its `sidebar_ui` rendering
   method stay in the UI crate.
 - **If it's an HTTP route or anything the browser dashboard serves, it belongs in
-  `humaipsy-web`.** `humaipsy-web` depends only on `humaipsy-core`, never on `apps/humaipsy` —
-  don't add a dependency in that direction, it would invert the whole point of the
-  split (a UI-free engine that a server can depend on). New read endpoints go in
-  `crates/humaipsy-web/src/routes.rs` and should read from `humaipsy-core` state (the
-  `Store`, or a snapshot type like `WebStatusSnapshot`) rather than trying to reach
-  into `apps/humaipsy`'s private UI-module statics — see "Known state-management debt"
-  below for why that's not accessible today anyway. `apps/humaipsy/src/app_model.rs`'s
+  `humaipsy-web`.** `humaipsy-web` depends only on `humaipsy-core`, never on the
+  `humaipsy` desktop crate — don't add a dependency in that direction, it would invert
+  the whole point of the split (a UI-free engine that a server can depend on). New read
+  endpoints go in `crates/humaipsy-web/src/routes.rs` and should read from
+  `humaipsy-core` state (the `Store`, or a snapshot type like `WebStatusSnapshot`)
+  rather than trying to reach into `humaipsy`'s private UI-module statics — see
+  "Known state-management debt" below for why that's not accessible today anyway.
+  `humaipsy/src/app_model.rs`'s
   `spawn_web_dashboard`/`update_web_status` (called from `ui/overview_chat/panel.rs`
   at the trial-lifecycle points) is the pattern for feeding new status fields
   through: add to `WebStatusSnapshot`, populate it in `update_web_status`, done — no
@@ -158,7 +164,7 @@ thing a user adds beside it is their own `vault/.master_hash`.
   `OllamaProvider` maps it onto Ollama's `num_predict`. As of this writing exactly
   one provider exists (Ollama) — this guidance is for when that changes, not a
   hint that more should be added speculatively now.
-- **State-management pattern**: `apps/humaipsy/src/ui/overview_chat/panel.rs` and
+- **State-management pattern**: `humaipsy/src/ui/overview_chat/panel.rs` and
   `chat.rs` hold experiment/chat UI state (current trial, chat rooms, participant
   ID, modal open/closed flags) on `OverviewChatUiState`, a field of `HumaiPsyUiState`
   owned by `HumaiPsyApp`, threaded through render calls explicitly — this used to be
@@ -179,9 +185,9 @@ thing a user adds beside it is their own `vault/.master_hash`.
 This app must build and behave the same on Windows, Linux, and macOS. Concretely:
 
 - **Never assume `HOME` is set.** Windows sets `USERPROFILE`, not `HOME`. Any code that
-  needs the user's home directory must check both (see `copy_experiment_csv_to_desktop`
-  in `apps/humaipsy/src/ui/overview_chat/panel.rs` for the pattern:
-  `std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))`).
+  needs the user's home directory must check both (see `desktop_directory` in
+  `humaipsy/src/ui/overview_chat/panel.rs`: `USERPROFILE` first on Windows, `HOME`
+  first elsewhere, with the other as a fallback).
 - **Don't add dependencies that pull in vendored OpenSSL.** A leftover
   `openssl = { features = ["vendored"] } ` direct dependency used to make the app
   fail to build on plain Windows dev machines (`openssl-sys` tries to compile OpenSSL
@@ -192,7 +198,7 @@ This app must build and behave the same on Windows, Linux, and macOS. Concretely
   rustls-based alternative.
 - **Fonts must be bundled, not loaded from OS-specific filesystem paths.** The chat UI
   needs Unicode emoji glyph coverage (Ollama responses can contain emoji), which egui's
-  stock fonts don't provide. `apps/humaipsy/src/ui/mod.rs` (`prepare_shell`) bundles
+  stock fonts don't provide. `humaipsy/src/ui/mod.rs` (`prepare_shell`) bundles
   `assets/NotoEmoji-Regular.ttf` via `include_bytes!` and registers it as a fallback in
   both font families — this works identically on Windows, Linux, and macOS with no
   runtime dependency on fonts being installed. An earlier version of this code probed
@@ -208,7 +214,7 @@ This app must build and behave the same on Windows, Linux, and macOS. Concretely
   excluded too. See `window_icon.rs` and `Cargo.toml`'s `[target.'cfg(windows)'...]`
   sections for the existing pattern — mirror it rather than inventing a new one.
 - **`scripts/run_app.sh` and `scripts/run_app.bat` must stay in parity.** Each is a thin
-  `cargo clean && cargo run` inside `apps/humaipsy/`; if you change one, change the other.
+  `cargo clean && cargo run` inside `humaipsy/`; if you change one, change the other.
   Neither release binary is code-signed — the Windows build will trigger a SmartScreen
   "unknown publisher" warning; that's a known, accepted state, not a bug to silently
   work around. Don't add signing scripts/CI steps unless explicitly asked.
@@ -238,7 +244,7 @@ labels:
 - `vault/.master_hash` — the filename holds an Argon2id hash, not a name. Renaming the
   path would make every existing install prompt to create a *new* master password.
 - the `overview_chat.humai_agent.*` inference-trace sources in
-  `apps/humaipsy/src/ui/overview_chat/panel.rs` — the `source` string is persisted into
+  `humaipsy/src/ui/overview_chat/panel.rs` — the `source` string is persisted into
   the CSV/ledger, so changing it would make the same event read differently in old and
   new runs.
 
@@ -253,14 +259,14 @@ in the codebase goes through these; a new one that doesn't is a regression.
 
 ## Build / run / test
 
-All commands are run from `apps/humaipsy/` (or via the `scripts/run_app.sh`/`.bat` wrapper,
+All commands are run from `humaipsy/` (or via the `scripts/run_app.sh`/`.bat` wrapper,
 which `cd`s into it for you). Cargo resolves the
 `humaipsy-core` path dependency automatically, so these commands build/test both crates'
 code as needed even though they're invoked from the binary crate's directory; to
 target `humaipsy-core` directly (e.g. running only its tests), pass `-p humaipsy-core` or
 run the same commands from `crates/humaipsy-core/` instead. `default-members =
-["apps/humaipsy"]` in the workspace root `Cargo.toml` means a bare `cargo check`/`test`
-run from the *repository root* only covers `apps/humaipsy` — use `--workspace` from the
+["humaipsy"]` in the workspace root `Cargo.toml` means a bare `cargo check`/`test`
+run from the *repository root* only covers `humaipsy` — use `--workspace` from the
 root if you want both crates.
 
 ```sh
@@ -285,7 +291,8 @@ cargo build --release
 
 `rust-toolchain.toml` pins `channel = "stable"` and `components = ["clippy", "rustfmt"]`,
 so a fresh `rustup show` in this repo provisions everything the workflow above needs.
-Edition is 2024 (`rustc >= 1.85`), which enables let-chains (`if let Some(x) = y && cond`)
+Edition is 2024, and eframe 0.37 sets the workspace MSRV to `rustc >= 1.95`;
+Edition 2024 enables let-chains (`if let Some(x) = y && cond`)
 — this is the idiomatic style already used throughout the codebase for what would
 otherwise be nested `if let { if ... }`. Because `channel = "stable"` floats forward,
 a new stable Rust release can occasionally graduate a new `clippy`/`rustc` lint that
@@ -309,13 +316,13 @@ does not also run on every push to `main`: merges land through squash-merged PRs
 that already ran these checks against the same tree, so re-running on `main` would
 just be duplicate work, not extra coverage. `--workspace` is load-bearing here — a
 plain `cargo check`/`test`/`clippy` invoked from inside a single member's directory
-(`apps/humaipsy/` or `crates/humaipsy-core/`) only covers that one package and silently
+(`humaipsy/` or `crates/humaipsy-core/`) only covers that one package and silently
 skips the other member's tests and lints.
 
 ### Building a release locally
 
 ```sh
-cargo build --release        # from apps/humaipsy/, or `cargo build --release -p humaipsy`
+cargo build --release        # from humaipsy/, or `cargo build --release -p humaipsy`
 ```
 
 That binary is complete: the icons, the emoji font and the dashboard are compiled in, so
@@ -338,7 +345,7 @@ one staging path produces the artifacts, not two that can drift apart.
   file for the full env-var list.
 - `vault.rs` must not depend on `egui`/`eframe` — it lives in `humaipsy-core` specifically
   so it can't. It's crypto and state (`MasterVault`, KDF params); rendering
-  lives in `apps/humaipsy/src/ui/vault_panel.rs`, which talks to it only through `pub`
+  lives in `humaipsy/src/ui/vault_panel.rs`, which talks to it only through `pub`
   accessors (`is_skip_vault`, `needs_password_setup`, `status`, `master_input_mut`,
   `confirm_input_mut`, `try_unlock`, `try_setup_password`). If you need the UI to
   observe new state, add an accessor rather than making the fields more visible than
@@ -366,14 +373,22 @@ one staging path produces the artifacts, not two that can drift apart.
   there's no restriction on what host `OLLAMA_HOST` points to, so a remote host receives
   full experiment transcripts. That's intentional (remote-Ollama is a supported use
   case), just be aware of it.
-- Both `reqwest::Client` construction sites (`ollama/client.rs`, `ollama/engine.rs`) set
-  `connect_timeout` so an unreachable host fails fast. `ollama/client.rs` (model
-  listing) also sets a short overall `timeout` since that request should always be
-  quick. `ollama/engine.rs` (chat inference) deliberately does *not* set a tight overall
-  timeout — a legitimate generation can stream for minutes — but caps it generously (10
-  minutes) as a backstop against a connection that goes silent forever after accepting.
-  Don't tighten the inference client's timeout without checking it won't cut off real
-  long-running generations.
+- Every `reqwest::Client` construction site (`ollama/client.rs` for model listing and the
+  metadata ping, `ollama/engine.rs` for inference) sets `connect_timeout` so an
+  unreachable host fails fast. `ollama/client.rs` also sets a short overall `timeout`
+  since those requests should always be quick. `ollama/engine.rs` (chat inference)
+  deliberately does *not* set a tight overall timeout — a legitimate generation can
+  stream for minutes — but caps it generously (10 minutes) as a backstop against a
+  connection that goes silent forever after accepting. Don't tighten the inference
+  client's timeout without checking it won't cut off real long-running generations.
+- Settings' "Ping Ollama" is `ollama::ping_ollama`, a *metadata-only* health check: it
+  issues `GET /api/version` and `GET /api/tags` (in parallel, 2 s connect / 4 s overall)
+  and must never call `/api/chat`. A chat request cold-loads the selected model first, so
+  implementing a "ping" as inference makes a 20 GB model take as long as a generation to
+  answer; that was the old behavior. `/api/tags` is also the fallback for older daemons
+  without `/api/version`, which is what keeps the check working across Ollama versions.
+  `test_ollama` remains the explicit, deliberately slower inference check behind the
+  separate "Test inference" button.
 
 ## Experiment recording
 
@@ -406,7 +421,7 @@ one staging path produces the artifacts, not two that can drift apart.
   Multi-statement writes (see `append_message`) must go through `conn.transaction()`,
   not sequential `execute()` calls, so a crash mid-write can't leave a message row
   without its generation row or a stale `conversations.updated_at`. The `Store` itself
-  is opened at most once per path and cached (`apps/humaipsy/src/ui/overview_chat/panel.rs`'s
+  is opened at most once per path and cached (`humaipsy/src/ui/overview_chat/panel.rs`'s
   `shared_store`, an `Arc<Store>` keyed by `PathBuf`) — don't call `Store::open`
   directly from UI render code; go through `shared_store`/`chat_db_path` instead, or
   you'll reintroduce the every-frame-reopen bug that pattern fixed.
@@ -421,7 +436,7 @@ one staging path produces the artifacts, not two that can drift apart.
 ## Local web dashboard
 
 - `crates/humaipsy-web` is spawned automatically by `HumaiPsy::new()`
-  (`apps/humaipsy/src/app_model.rs::spawn_web_dashboard`) onto the Tokio runtime
+  (`humaipsy/src/app_model.rs::spawn_web_dashboard`) onto the Tokio runtime
   `main.rs` already keeps alive — there is no separate server process to start or
   stop, and no way to run it without also running the desktop app (by design; see
   `crates/humaipsy-web/src/lib.rs`'s doc comment if you want to change that).
@@ -443,7 +458,7 @@ one staging path produces the artifacts, not two that can drift apart.
   requires a rebuild to take effect (no live-reload), and nothing is staged beside the
   binary for the dashboard to work.
 - **The dashboard is gated by the master-password vault, mirrored via a shared
-  flag.** `HumaiPsyApp::update` (`ui/mod.rs`) syncs `humaipsy_core::vault::MasterVault::is_unlocked()`
+  flag.** `HumaiPsyApp::ui` (`ui/mod.rs`) syncs `humaipsy_core::vault::MasterVault::is_unlocked()`
   into `HumaiPsy::vault_unlocked` (`humaipsy_web::SharedVaultLock`, an `Arc<AtomicBool>`)
   every frame; `routes::get_status`/`get_messages` check it first and withhold
   content when `false`. If you add a new route that reads any experiment data, check
@@ -456,14 +471,14 @@ one staging path produces the artifacts, not two that can drift apart.
 Releases are tagged directly on `main`, not from a dedicated release branch — that's
 Git Flow-style overhead this project doesn't need (it earns its keep only once you must
 maintain multiple release lines in parallel, e.g. patching an old version while `main`
-has diverged; not the case here). The flow: bump `version` in `apps/humaipsy/Cargo.toml`
+has diverged; not the case here). The flow: bump `version` in `humaipsy/Cargo.toml`
 (and let `Cargo.lock` update) on its own short-lived branch, PR it into `main` like any
 other change, then tag `vX.Y.Z` at that merge commit on `main` and push the tag — that
 fires `release.yml`, which gates on `ci.yml`, opens a draft release, builds
 `humaipsy-<version>-{windows-x86_64.zip,linux-x86_64.tar.gz,macos-aarch64.tar.gz}`,
 attaches `SHA256SUMS.txt`, and publishes.
 
-Before tagging, the three crate versions are kept equal (`apps/humaipsy`,
+Before tagging, the three crate versions are kept equal (`humaipsy`,
 `crates/humaipsy-core`, `crates/humaipsy-web`): they are path dependencies and are never
 published separately, so a split version number only misleads. The window title reads
 its version from `CARGO_PKG_VERSION`, so it cannot drift from the manifest again.
@@ -478,9 +493,9 @@ its version from `CARGO_PKG_VERSION`, so it cannot drift from the manifest again
   consistent formatting pass; a full reformat would bury real changes in noise. Match
   the surrounding file's existing style when editing, and only fix formatting in lines
   you're already touching.
-- `apps/humaipsy/metrics/*.csv`, `metrics/runs/`, `metrics/chat.sqlite`, and
+- `humaipsy/metrics/*.csv`, `metrics/runs/`, `metrics/chat.sqlite`, and
   `vault/.master_hash` are gitignored local/experiment artifacts — never add them to git.
 - Don't add a new process-global `OnceLock<Mutex<T>>` singleton for state that has a
   natural owner (`HumaiPsy`, `HumaiPsyApp`, or a small nested state struct). See "`humaipsy-core`
-  vs `apps/humaipsy`: where new code goes" above — `panel.rs`/`chat.rs` used to do this;
+  vs `humaipsy`: where new code goes" above — `panel.rs`/`chat.rs` used to do this;
   it's fixed now (see `OverviewChatUiState`), don't reintroduce the pattern.

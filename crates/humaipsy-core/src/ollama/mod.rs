@@ -157,6 +157,50 @@ pub async fn fetch_ollama_models(ollama_host: &str) -> Result<Vec<String>> {
     client::fetch_models(ollama_host).await
 }
 
+/// Result of the fast, metadata-only Ollama health check used by Settings.
+#[derive(Clone, Debug)]
+pub struct OllamaPing {
+    /// `None` when the daemon predates `GET /api/version`; `/api/tags` still
+    /// proves that an old server is reachable.
+    pub version: Option<String>,
+    pub model_count: usize,
+    pub latency_ms: u128,
+}
+
+impl OllamaPing {
+    /// One-line human-readable summary for the Settings panel, e.g.
+    /// `0.40.3 · 11 models · 118 ms`.
+    pub fn summary(&self) -> String {
+        let mut parts = vec![match &self.version {
+            Some(version) => version.clone(),
+            None => "version not reported".to_string(),
+        }];
+        parts.push(format!(
+            "{} model{}",
+            self.model_count,
+            if self.model_count == 1 { "" } else { "s" }
+        ));
+        parts.push(format!("{} ms", self.latency_ms));
+        parts.join(" · ")
+    }
+}
+
+/// Health-check an Ollama daemon without running inference.
+///
+/// This deliberately issues only `GET /api/version` and `GET /api/tags`. It
+/// never calls `/api/chat`, because that endpoint loads the selected model
+/// into memory first and turns a "ping" into a multi-second (or multi-minute)
+/// cold start. `/api/tags` is also the fallback for older Ollama builds that
+/// do not expose `/api/version`, so the check works across versions.
+pub async fn ping_ollama(ollama_host: &str) -> Result<OllamaPing> {
+    let ping = client::ping(ollama_host).await?;
+    Ok(OllamaPing {
+        version: ping.version,
+        model_count: ping.model_count,
+        latency_ms: ping.latency_ms,
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn send_to_ollama(
     ollama_host: &str,
@@ -339,5 +383,25 @@ mod tests {
     fn parse_url_like_rejects_empty_input() {
         assert!(parse_url_like("").is_err());
         assert!(parse_url_like("   ").is_err());
+    }
+
+    #[test]
+    fn ping_summary_names_the_version_and_model_count() {
+        let ping = OllamaPing {
+            version: Some("0.40.3".to_string()),
+            model_count: 11,
+            latency_ms: 118,
+        };
+        assert_eq!(ping.summary(), "0.40.3 · 11 models · 118 ms");
+    }
+
+    #[test]
+    fn ping_summary_handles_an_old_daemon_without_a_version() {
+        let ping = OllamaPing {
+            version: None,
+            model_count: 1,
+            latency_ms: 4,
+        };
+        assert_eq!(ping.summary(), "version not reported · 1 model · 4 ms");
     }
 }

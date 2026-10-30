@@ -39,6 +39,14 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// Chat content is plain text except for inline **bold**. Escape first, then
+// add only the <strong> tags we generate ourselves, so a model response can
+// never inject markup. Unmatched markers are left visible, matching the
+// desktop transcript's renderer.
+function renderInlineMarkup(text) {
+  return escapeHtml(text).replace(/\*\*([\s\S]+?)\*\*/g, "<strong>$1</strong>");
+}
+
 function renderMessages(messages) {
   const container = el("messages");
   if (!messages || messages.length === 0) {
@@ -52,7 +60,7 @@ function renderMessages(messages) {
       const from = m.from || source;
       return `<div class="message source-${escapeHtml(source)}">
         <div class="meta"><span>${escapeHtml(from)}</span><span>${escapeHtml(m.timestamp || "")}</span></div>
-        <div class="content">${escapeHtml(m.content)}</div>
+        <div class="content">${renderInlineMarkup(m.content)}</div>
       </div>`;
     })
     .join("");

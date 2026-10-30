@@ -90,10 +90,26 @@ pub fn counterbalance_starts_with_argum(participant_id: &str) -> bool {
 /// condition + trial-in-condition pair, applying counterbalancing when there is
 /// more than one condition. `conditions` is clamped to `1..=MAX_CONDITIONS`.
 pub fn trial_descriptor(index: usize, participant_id: &str, conditions: usize) -> TrialDescriptor {
+    trial_descriptor_with_start(
+        index,
+        counterbalance_starts_with_argum(participant_id),
+        conditions,
+    )
+}
+
+/// Like [`trial_descriptor`], but the starting condition is chosen explicitly
+/// by the researcher instead of being derived from the participant ID.
+///
+/// `starts_with_argum` starts the sequence on the Argumentative condition when
+/// there are two conditions; with a single condition it has no effect.
+pub fn trial_descriptor_with_start(
+    index: usize,
+    starts_with_argum: bool,
+    conditions: usize,
+) -> TrialDescriptor {
     let condition_count = conditions.clamp(1, MAX_CONDITIONS);
-    let starts_with_argum = condition_count > 1 && counterbalance_starts_with_argum(participant_id);
     let base_condition = index % condition_count;
-    let condition_index = if starts_with_argum {
+    let condition_index = if condition_count > 1 && starts_with_argum {
         (base_condition + 1) % condition_count
     } else {
         base_condition
@@ -207,6 +223,23 @@ mod tests {
                 let d = trial_descriptor(i, participant, 1);
                 assert_eq!(d.condition_index, 0);
             }
+        }
+    }
+
+    #[test]
+    fn trial_descriptor_with_start_can_begin_on_argum() {
+        let seq: Vec<usize> = (0..4)
+            .map(|i| trial_descriptor_with_start(i, true, 2).condition_index)
+            .collect();
+        // ARGUM, COOP, ARGUM, COOP
+        assert_eq!(seq, vec![1, 0, 1, 0]);
+    }
+
+    #[test]
+    fn trial_descriptor_with_start_ignores_the_start_flag_for_one_condition() {
+        for i in 0..4 {
+            let d = trial_descriptor_with_start(i, true, 1);
+            assert_eq!(d.condition_index, 0);
         }
     }
 

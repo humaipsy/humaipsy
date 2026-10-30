@@ -1,6 +1,6 @@
 [workspace]
-members = ["apps/humaipsy", "crates/humaipsy-core", "crates/humaipsy-web"]
-default-members = ["apps/humaipsy"]
+members = ["humaipsy", "crates/humaipsy-core", "crates/humaipsy-web"]
+default-members = ["humaipsy"]
 resolver = "3"
 
 [profile.release]

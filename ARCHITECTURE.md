@@ -12,7 +12,7 @@ what's actually protected — and what isn't — about experiment data, see
 HumaiPsy is a desktop application for running structured Human-AI Interaction (HCI)
 experiments, built as three Cargo workspace members: **`humaipsy-core`**, a UI-free
 library crate holding the engine (agent prompting, the Ollama client, experiment
-recording, the chat SQLite store, the master-password vault); **`apps/humaipsy`**, the
+recording, the chat SQLite store, the master-password vault); **`humaipsy`**, the
 `eframe`/`egui` desktop binary that renders the UI on top of it; and
 **`humaipsy-web`**, a small local read-only browser dashboard served from within the
 desktop app's own process. A researcher configures an experiment design (participant
@@ -25,20 +25,20 @@ network exposure is the optional dashboard, bound to loopback by default (see
 [Local web dashboard](#local-web-dashboard) below), and the only outbound one is the
 Ollama host the operator configures.
 
-The `humaipsy-core`/`apps/humaipsy` split exists specifically so the engine can be
+The `humaipsy-core`/`humaipsy` split exists specifically so the engine can be
 exercised without booting a GUI window — unit tests import `humaipsy-core` directly, and
 it's what `humaipsy-web` (and a future CLI batch-runner) depend on too.
 
 ## Process model
 
 ```
-main() [apps/humaipsy/src/main.rs]
+main() [humaipsy/src/main.rs]
   ├─ spawns a dedicated OS thread running a Tokio multi-thread runtime
   │    (kept alive for the process lifetime; used for all humaipsy_core::ollama HTTP
   │     calls, model-list refreshes, and the humaipsy-web dashboard server, all via
   │     rt_handle.spawn(...) — one runtime, no second process)
   └─ eframe::run_native(...) on the calling thread
-       └─ HumaiPsyApp::update() — called once per UI frame
+       └─ HumaiPsyApp::ui() — called once per UI frame
             ├─ vault gate (humaipsy_core::vault::MasterVault) — blocks all UI until unlocked
             ├─ HumaiPsy::render_main_panel() — tab dispatch (Overview / Design / Settings)
             └─ background task results are drained from Arc<Mutex<..>> /
@@ -67,6 +67,10 @@ crates/humaipsy-core/          Library crate — zero egui/eframe dependency
     experiment/                  Trial-sequencing/counterbalancing engine — pure,
                               parameterized functions (no process-global state), unit
                               tested directly. See "Experiment engine" below.
+    markdown.rs                   Minimal inline Markdown for chat content: `**bold**`
+                              only, unmatched markers preserved literally. Pure and
+                              unit tested; the web dashboard implements the same rules
+                              in its own renderer.
     provider/                      Backend-agnostic chat-completion abstraction —
                               see "Provider abstraction" below. HumaiPsyAgent depends on
                               this, not on ollama:: directly.
@@ -80,9 +84,11 @@ crates/humaipsy-core/          Library crate — zero egui/eframe dependency
                               by the provider abstraction, still the only thing that
                               actually speaks HTTP to a model backend
       mod.rs                        Public API: send_to_ollama, fetch_ollama_models,
-                              test_ollama, HttpPolicy (air-gap enforcement),
-                              DEFAULT_OLLAMA_MODEL, timing/usage types
-      client.rs                      GET /api/tags — model discovery, tightly timeboxed
+                              ping_ollama, test_ollama, HttpPolicy (air-gap
+                              enforcement), DEFAULT_OLLAMA_MODEL, timing/usage types
+      client.rs                      GET /api/tags — model discovery, tightly timeboxed;
+                              GET /api/version + /api/tags — the metadata-only ping
+                              behind Settings' "Ping Ollama"
       engine.rs                       POST /api/chat — streaming NDJSON chat completion,
                               per-host client cache, TTFT + token-usage capture
     recording/                        Experiment data capture
@@ -103,10 +109,10 @@ crates/humaipsy-core/          Library crate — zero egui/eframe dependency
     vault.rs                                 Master-password gate (Argon2id)
 
 crates/humaipsy-web/            Library crate — local read-only browser dashboard.
-  Cargo.toml                  Depends on humaipsy-core only (not apps/humaipsy) — same
+  Cargo.toml                  Depends on humaipsy-core only (not the humaipsy desktop crate) — same
                               one-directional dependency shape as humaipsy-core itself,
                               so it could run standalone later even though today
-                              it's always spawned embedded in apps/humaipsy.
+                              it's always spawned embedded in humaipsy.
   web/                          Plain HTML/JS/CSS, no build step, no framework —
                               embedded into the binary at compile time (include_str!),
                               not served from a filesystem path (see routes.rs)
@@ -114,12 +120,12 @@ crates/humaipsy-web/            Library crate — local read-only browser dashbo
     lib.rs                       pub async fn serve(WebServerConfig) — binds a
                               TcpListener and runs axum::serve until the process exits
     status.rs                     WebStatusSnapshot (serde Serialize) + the
-                              Arc<Mutex<..>> alias apps/humaipsy writes into
+                              Arc<Mutex<..>> alias humaipsy writes into
     routes.rs                      GET / (+ /app.js, /style.css, embedded), GET
                               /api/status, GET /api/messages (reads humaipsy_core::store::Store
                               directly — no new Store methods needed)
 
-apps/humaipsy/                  UI binary — depends on humaipsy-core and humaipsy-web as path dependencies
+humaipsy/                  UI binary — depends on humaipsy-core and humaipsy-web as path dependencies
   src/
     main.rs                    Process entry point: Tokio runtime bootstrap, eframe::run_native
     lib.rs                      Module tree / re-exports (pub use ... as the crate's public API)
@@ -132,18 +138,25 @@ apps/humaipsy/                  UI binary — depends on humaipsy-core and humai
     ui/                                  egui rendering, one module per panel
       mod.rs                              HumaiPsyApp (the eframe::App impl), theme + font
                               bootstrap, vault-gated top-level frame dispatch;
-                              HumaiPsyUiState also holds the persisted egui_tiles::Tree
-                              for the Overview tab's resizable layout
+                              HumaiPsyUiState holds OllamaUiState and
+                              OverviewChatUiState
+      theme.rs                            Catppuccin palette + egui Visuals mapping
+                              (local; catppuccin-egui stops at egui 0.33)
       panel_render.rs                       Top-level tab bar (Overview / Design / Settings)
-      settings_panel.rs                       Ollama host/model selection, connection test,
-                              CSV recording toggle/output dir, dashboard URL, theme picker
+      settings_panel.rs                       Ollama host/model selection, fast connection
+                              ping + separate inference test, CSV recording toggle/output
+                              dir, dashboard URL, theme picker
       vault_panel.rs                            Renders MasterVault state; the only file
                               allowed to import both egui and humaipsy_core::vault together
       overview_chat/                              Experiment engine UI + chat rendering
         panel.rs                                    Trial sequencing orchestration (delegates
                               its math to humaipsy_core::experiment), condition/timeout handling,
-                              CSV export shortcut, chat room UI, participant-ID modal, the
-                              egui_tiles OverviewPane/Behavior for the sidebar/chat split.
+                              timer controls (Play starts a fresh run or resumes a pause, Pause
+                              only stops the clock, X stops and resets, >> advances and resets
+                              the new trial's clock), agent name/prompt fields and the
+                              Randomisation Condition start selector, CSV export shortcut,
+                              chat room UI, participant-ID modal, the egui_tiles
+                              OverviewPane/Behavior for the sidebar/chat split.
                               Orchestration state (OverviewChatUiState: current trial, chat
                               rooms, participant ID, modal state) is a field on HumaiPsyUiState,
                               threaded through render calls explicitly — not process-global.
@@ -163,10 +176,15 @@ state, no UI dependency, fully unit tested (see `crates/humaipsy-core/src/experi
 It implements a within-subject design: up to [`MAX_CONDITIONS`] = 2 named conditions
 (`COOP` — Cooperative, `ARGUM` — Argumentative), each mapped to a distinct system
 prompt (`HUMAIPSY_COOP_AGENT_PROMPT` / `HUMAIPSY_ARGUM_AGENT_PROMPT` env vars, defaults in
-`apps/humaipsy/src/app_model.rs`), with a researcher-configurable number of trials per
+`humaipsy/src/app_model.rs`), with a researcher-configurable number of trials per
 condition. Condition order is counterbalanced by parity of the participant ID's
 trailing digits (even IDs run COOP→ARGUM, odd IDs run ARGUM→COOP) so consecutive
-participants don't share an order bias.
+participants don't share an order bias. The Design tab's **Randomisation Condition**
+selector can override the starting condition explicitly (Condition 1 = COOP,
+Condition 2 = ARGUM), which is how a researcher chooses which agent speaks first.
+Each condition's agent also has a configurable name (defaults `NO_NAME_1` / `NO_NAME_2`);
+the name is embedded in that agent's system prompt and stored as the transcript's
+sender label, so a transcript attributes each reply to the agent that produced it.
 
 The Design tab's "Conditions" control is clamped to `1..=2` (with a tooltip
 explaining why) rather than accepting an arbitrary count that the engine would
@@ -175,7 +193,7 @@ asking for more can't actually be honored yet (see [Roadmap](#roadmap--next-step
 for generalizing this). "Trials per condition" has no such ceiling and is fully
 wired through to `humaipsy_core::experiment::total_experiment_trials`.
 
-`apps/humaipsy/src/ui/overview_chat/panel.rs` owns trial *orchestration* — timing via
+`humaipsy/src/ui/overview_chat/panel.rs` owns trial *orchestration* — timing via
 the `timer` module, streaming a chat transcript through `ChatExample`/`Store`, and
 emitting `TrialStart`/`Transcript`/`TrialEnd`/`TrialTotal` rows via
 `recording::experiment_csv` — but delegates every piece of counterbalancing/
@@ -188,7 +206,12 @@ so it's scoped to one `HumaiPsyApp` instance rather than the whole process.
 After the last trial the participant is prompted for a free-text final answer, the
 experiment is marked complete, and the operator can copy the just-written CSV to the
 Desktop directly from the completion popup (`copy_experiment_csv_to_desktop`,
-cross-platform via `HOME`/`USERPROFILE`).
+cross-platform via `HOME`/`USERPROFILE`, preferring `OneDrive\Desktop` when it exists).
+The copy clears a read-only destination and retries, uses the first free numbered name
+when the destination is locked, and falls back to `Downloads` when the Desktop folder
+itself is not writable (for example when Windows Controlled Folder Access blocks the
+unsigned executable). If even that fails, the error names the CSV's existing path under
+the metrics directory.
 
 ## Provider abstraction
 
@@ -199,7 +222,7 @@ only implementation today is `provider::ollama_provider::OllamaProvider`, a thin
 adapter that calls straight into the `ollama::` module below with no new HTTP logic
 of its own. Adding a second backend (OpenAI, Anthropic, ...) later means writing a
 new `impl Provider`, not touching `agent.rs` or the two `HumaiPsyAgent::new(...)` call
-sites in `apps/humaipsy/src/ui/overview_chat/panel.rs` — both construct an
+sites in `humaipsy/src/ui/overview_chat/panel.rs` — both construct an
 `Arc<dyn Provider>` (currently always an `OllamaProvider`) and hand it to the agent.
 No second backend exists yet; this is a seam, not a feature.
 
@@ -233,6 +256,13 @@ generation) goes through. Internally:
 - Model listing (`GET /api/tags`, used by the Settings model picker) uses a separate,
   tightly-timeboxed client so an unreachable host fails fast instead of hanging the
   Settings panel.
+- "Ping Ollama" in Settings is a *metadata-only* health check: it issues
+  `GET /api/version` and `GET /api/tags` (in parallel, 2 s connect / 4 s overall) and
+  never calls `/api/chat`. A chat request would load the selected model first, which is
+  why the old "ping" appeared to take as long as a full generation. `/api/tags` is also
+  the fallback for older daemons without `/api/version`, so the check keeps working
+  across Ollama versions. "Test inference" is the separate, deliberately slower button
+  that exercises `POST /api/chat`.
 - A cooperative stop mechanism (`OllamaStopEpoch`, an `Arc<AtomicU64>` + captured
   epoch value) lets the UI cancel an in-flight generation by bumping a counter; the
   streaming loop checks it between chunks and between lines.
@@ -282,9 +312,11 @@ creation time (no-op on Windows, where per-user profile ACLs already isolate the
 
 ## UI shell
 
-Built on `eframe`/`egui` 0.33 with the [Catppuccin](https://github.com/catppuccin)
-color themes (Latte/Frappé/Macchiato/Mocha, user-selectable in Settings) and
-[Phosphor icons](https://github.com/amPerl/egui-phosphor). A bundled monochrome
+Built on `eframe`/`egui` 0.37 with the glow backend and the
+[Catppuccin](https://github.com/catppuccin) color themes
+(Latte/Frappé/Macchiato/Mocha, user-selectable in Settings). The palettes and
+the small `Visuals` mapping live in `humaipsy/src/ui/theme.rs` because the
+`catppuccin-egui` crate does not yet support egui 0.37. A bundled monochrome
 Unicode emoji font (`assets/NotoEmoji-Regular.ttf`, `include_bytes!`) is installed as
 a fallback in both font families at startup so Ollama responses containing emoji
 render identically on Windows, Linux, and macOS without depending on OS-installed
@@ -293,9 +325,8 @@ monochrome, not full-color — a renderer limitation, not a bug).
 
 Three top-level tabs (`app_model::MainPanelTab`):
 - **Overview** — the live chat/experiment room. The sidebar (timer, participant ID,
-  room management) and the message thread are two `egui_tiles` panes with a
-  user-draggable divider (`OverviewPane`/`OverviewPanesBehavior` in `panel.rs`),
-  not a fixed-width split.
+  room management) and the message thread are two panes with a user-draggable
+  divider in `panel.rs`, not a fixed-width split.
 - **Design** — experiment design fields (name, participant ID, topic, condition
   count, trials-per-condition, trial duration) that feed `ExperimentDesignSnapshot`.
 - **Settings** — Ollama host/model configuration and connectivity test, CSV recording
@@ -309,7 +340,7 @@ of the egui UI. It serves a plain HTML/JS/CSS page (`crates/humaipsy-web/web/`, 
 into the binary at compile time) that polls two JSON endpoints every ~1.5s:
 
 - `GET /api/status` — a `WebStatusSnapshot` (design name, participant ID, condition,
-  trial progress, running state, timer) that `apps/humaipsy`'s `panel.rs` updates at the
+  trial progress, running state, timer) that `humaipsy`'s `panel.rs` updates at the
   same points it already mutates its trial-session state
   (`update_web_status`, called from `start_experiment_from_play`,
   `advance_to_next_trial`, `finalize_experiment`)
@@ -327,7 +358,7 @@ human-subjects data, so inbound exposure gets the same opt-in caution the outbou
 port is already in use) is logged to stderr; the desktop app starts regardless.
 
 **Gated by the master-password vault, not independently authenticated.** The
-dashboard has no login of its own — instead, `HumaiPsyApp::update` (`ui/mod.rs`) mirrors
+dashboard has no login of its own — instead, `HumaiPsyApp::ui` (`ui/mod.rs`) mirrors
 `MasterVault::is_unlocked()` into a shared `humaipsy_web::SharedVaultLock` flag every
 frame, and `get_status`/`get_messages` check it before touching any state, returning
 blanked/empty responses while locked. Locking the desktop app (the Settings "Lock"
@@ -378,7 +409,7 @@ Rough priority order, highest-value first:
    write endpoints (send a message, advance a trial) — `OverviewChatUiState` being a
    real, addressable field (rather than private statics inside `panel.rs`) removes
    the structural blocker this used to have; this is now an `humaipsy-web`-side scoping
-   question, not something waiting on `apps/humaipsy` first.
+   question, not something waiting on `humaipsy` first.
 4. A real hostname/TLS story for the dashboard (`https://humaipsy.local` via mDNS, or a
    self-signed localhost cert) if plain `http://localhost:8787` stops being enough.
 5. An Intel (`x86_64-apple-darwin`) macOS release build, or a `lipo`-merged universal
@@ -386,16 +417,16 @@ Rough priority order, highest-value first:
 
 ## Build & release
 
-- Three-member Cargo workspace (`apps/humaipsy`, `crates/humaipsy-core`, `crates/humaipsy-web`);
+- Three-member Cargo workspace (`humaipsy`, `crates/humaipsy-core`, `crates/humaipsy-web`);
   `[profile.release]` (LTO, `codegen-units = 1`, `strip = true`) lives in the
   workspace-root `Cargo.toml` because Cargo only reads profile settings from the root.
-- `apps/humaipsy/build.rs` is Windows-only: generates a multi-resolution `.ico` from
+- `humaipsy/build.rs` is Windows-only: generates a multi-resolution `.ico` from
   `assets/icon_window_bar.png` and embeds it as a Win32 resource via `winres`.
 - `reqwest` uses `rustls-tls` and `rusqlite` uses the `bundled` SQLite — both
   deliberately chosen to avoid a system OpenSSL/pkg-config dependency on Windows dev
-  machines. Both live in `humaipsy-core`; `apps/humaipsy` only adds UI-specific
-  dependencies (`eframe`, `egui`, `catppuccin-egui`, `egui-phosphor`, `egui_tiles`,
-  the Windows icon toolchain) on top of `humaipsy-core`/`humaipsy-web` path dependencies.
+  machines. Both live in `humaipsy-core`; `humaipsy` only adds UI-specific
+  dependencies (`eframe`, `egui`, the Windows icon toolchain) on top of
+  `humaipsy-core`/`humaipsy-web` path dependencies.
   `humaipsy-web` itself adds `axum` — chosen over alternatives (Rocket, actix-web)
   specifically because `hyper`/`tower` are already resolved transitively via
   `reqwest`, so it shares the existing async HTTP stack instead of introducing a
