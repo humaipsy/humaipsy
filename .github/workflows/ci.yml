@@ -1,7 +1,22 @@
 name: CI
 
 on:
+  # Only a pull request whose BASE branch is `main` runs the gate.
+  #
+  # `dev` is the integration branch: work lands there through pull requests or
+  # direct pushes with no CI run, and the single `dev` -> `main` pull request is
+  # where the three-OS gate actually decides whether a tree may ship. That is a
+  # deliberate trade — `dev` breaks silently, and the cost is paid once at the
+  # merge instead of on every intermediate commit.
+  #
+  # `branches` under `pull_request` filters on the pull request's TARGET branch,
+  # not on the branch doing the pushing. So `dev` has to carry this same file for
+  # its own pull requests to be skipped — it does, and main keeps its own copy —
+  # and a feature branch merged into `dev` is covered by `dev`'s copy. Do not
+  # "simplify" this to `branches-ignore`: it is the same field with inverted
+  # meaning, and the next person reads it backwards.
   pull_request:
+    branches: [main]
   # Called by release.yml as its gate, so a tag is only ever cut over a tree that
   # passed exactly what a pull request passes — not a second copy of the same steps.
   workflow_call:

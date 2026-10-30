@@ -102,7 +102,7 @@ humaipsy/                      # the UI binary — depends on humaipsy-core and 
   vault/.master_hash                  # gitignored — local Argon2id hash file, created on first run
   metrics/                            # gitignored except structure — CSV/ledger exports + chat.sqlite land here
 scripts/run_app.sh / .bat           # `cargo clean && cargo run` — quick dev loop
-.github/workflows/ci.yml               # runs on every PR: check/test/clippy --workspace on Linux + Windows + macOS;
+.github/workflows/ci.yml               # runs on a PR into main: check/test/clippy --workspace on Linux + Windows + macOS;
                                        #   also `workflow_call`, so a release reuses it as its gate
 .github/workflows/release.yml          # tag-triggered: one three-OS matrix build, then SHA256SUMS + publish
 .github/workflows/pages.yml            # publishes docs/ to GitHub Pages on a push to main that touches docs/
@@ -310,14 +310,25 @@ unwind + `catch_unwind` so the rest of the app keeps running; `panic = "abort"` 
 turn any single bad task panic into a full process crash.
 
 `.github/workflows/ci.yml` runs `cargo check`/`test`/`clippy -D warnings --workspace`
-on Linux, Windows, and macOS for every PR — this is the gate that catches breakage
-before a merge, and therefore before a release tag is ever cut. Keep it green. It
-does not also run on every push to `main`: merges land through squash-merged PRs
-that already ran these checks against the same tree, so re-running on `main` would
-just be duplicate work, not extra coverage. `--workspace` is load-bearing here — a
-plain `cargo check`/`test`/`clippy` invoked from inside a single member's directory
-(`humaipsy/` or `crates/humaipsy-core/`) only covers that one package and silently
-skips the other member's tests and lints.
+on Linux, Windows, and macOS for a pull request into `main` — this is the gate that
+catches breakage before a merge, and therefore before a release tag is ever cut. Keep
+it green. It does not also run on every push to `main`: merges land through
+squash-merged PRs that already ran these checks against the same tree, so re-running
+on `main` would just be duplicate work, not extra coverage.
+
+It also does not run for a pull request into `dev`. `dev` is the integration branch:
+changes land there without waiting on a nine-job matrix, and the single
+`dev` -> `main` pull request is where the gate actually runs. Two consequences to
+keep in mind rather than discover — `main` is the only branch guaranteed green (a
+`dev` commit can be broken), and a release is still tagged on `main`, never on `dev`.
+The filter lives under `pull_request.branches`, which matches the *target* branch of
+a pull request rather than the branch pushing to it, which is why `dev` carries its
+own copy of `ci.yml`: change the trigger on `dev` first and let it reach `main`
+through the usual merge, or `dev`'s own pull requests start running the gate again.
+
+`--workspace` is load-bearing here — a plain `cargo check`/`test`/`clippy` invoked
+from inside a single member's directory (`humaipsy/` or `crates/humaipsy-core/`) only
+covers that one package and silently skips the other member's tests and lints.
 
 ### Building a release locally
 
