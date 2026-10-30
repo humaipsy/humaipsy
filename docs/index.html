@@ -3,215 +3,297 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HumaiPsy — Human-AI Interaction research instrument</title>
-<meta name="description" content="HumaiPsy is a cross-platform desktop application for running structured Human-AI Interaction experiments for cognitive science, HCI, and AI research.">
+<meta name="color-scheme" content="light">
+<title>HumaiPsy — a study interface for Human–AI interaction</title>
+<meta name="description" content="HumaiPsy runs counterbalanced Human–AI interaction trials against a local or remote model, and records every trial as a CSV, an audit ledger and a full transcript.">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
+<!-- impeccable-disable cramped-padding: the hairline rules are the sheet's own grid,
+     not container borders. Every field, procedure step and spec row is inset by its
+     own padding-block (28-42px, 12-14px on the nested rows), declared through
+     var(--field-y) and clamp(), which the static pass cannot resolve — so it reads
+     each rule as content flush to a border. The rendered page measures the inset. -->
+
+<a class="skip-link" href="#sheet">Skip to the content</a>
+
 <header class="masthead">
-  <div class="wrap">
-    <div class="wordmark">
-      <span class="mark">HumaiPsy</span>
-      <span class="tag">/ human-ai interaction, instrumented</span>
-    </div>
-    <nav class="masthead-links">
-      <a href="#features">Features</a>
-      <a href="#research">For researchers</a>
-      <a href="#architecture">Architecture</a>
+  <div class="shell masthead__bar">
+    <a class="wordmark" href="./index.html">HumaiPsy</a>
+    <nav class="nav" aria-label="Primary">
       <a href="https://github.com/humaipsy/humaipsy">Repository</a>
+      <a class="btn btn--primary" href="https://github.com/humaipsy/humaipsy/releases">Download</a>
     </nav>
   </div>
 </header>
 
-<main>
-  <section class="hero">
-    <div class="wrap prose">
-      <hr class="rule">
-      <span class="eyebrow">Desktop application · Windows, Linux, macOS</span>
-      <h1>A research instrument for structured Human&#8209;AI interaction experiments.</h1>
-      <p class="lede">
-        HumaiPsy runs multi-condition trials against a local or
-        remote AI model, and records every trial in formats built for
-        statistical analysis and research.
-      </p>
-      <div class="cta-row">
-        <a class="btn primary" href="https://github.com/humaipsy/humaipsy/releases">Download a release</a>
-        <a class="btn" href="https://github.com/humaipsy/humaipsy">Source on GitHub</a>
-      </div>
-    </div>
-  </section>
+<main class="shell" id="sheet">
 
-  <div class="panel-band">
-    <div class="wrap panel">
-      <!-- Some design -->
-      <div class="panel-cell">
-        <span class="label">Conditions</span>
-        <div class="condition-row">
-          <div class="condition-col">
-            <span class="condition-chip coop">COND X</span>
-            <span class="condition-chip argum">COND Y</span>
-          </div>
-          <div class="condition-col">
-            <span class="condition-chip coop">AGENT A</span>
-            <span class="condition-chip argum">AGENT B</span>
-          </div>
-        </div>
-      </div>
-      <!-- Cool animation here -->
-      <div class="panel-cell">
-        <span class="label">Trial</span>
-        <div class="readout-value">04 / 12</div>
-        <div class="trial-track" aria-hidden="true">
-          <span class="trial-dot done coop"></span><span class="trial-dot done argum"></span>
-          <span class="trial-dot done coop"></span><span class="trial-dot active"></span>
-          <span class="trial-dot"></span><span class="trial-dot"></span>
-          <span class="trial-dot"></span><span class="trial-dot"></span>
-          <span class="trial-dot"></span><span class="trial-dot"></span>
-          <span class="trial-dot"></span><span class="trial-dot"></span>
-        </div>
-      </div>
-      <div class="panel-cell">
-        <span class="label">Recording</span>
-        <div class="readout-value" style="font-size:16px; margin-top:14px; line-height:1.9;">
-          csv · jsonl ledger · sqlite
-        </div>
-      </div>
-      <div class="panel-cell">
-        <span class="label">Network</span>
-        <div class="readout-value" style="font-size:16px; margin-top:14px; line-height:1.9;">
-          offline-first · air-gap opt-in
-        </div>
-      </div>
+  <div class="title-block">
+    <h1>A study interface for Human–AI interaction.</h1>
+    <p class="lede">
+      Two agents, two conditions, any number of counterbalanced trials. Every trial is
+      timed, recorded, and written out in a form a statistics package can read.
+    </p>
+    <div class="actions">
+      <a class="btn btn--primary" href="https://github.com/humaipsy/humaipsy/releases">Download HumaiPsy</a>
+      <a class="btn btn--ghost" href="https://github.com/humaipsy/humaipsy">Source on GitHub</a>
     </div>
+    <p class="hosts mono">Windows · Linux · macOS</p>
   </div>
 
-  <section id="features">
-    <div class="wrap">
-      <div class="section-head">
-        <span class="eyebrow">What it does</span>
-        <h2>Built for research, not a demo.</h2>
-        <p>
-          Every part of HumaiPsy exists to serve a trial: run it, time it, record it,
-          and hand back data a statistics package can read.
-        </p>
+  <section class="field" aria-labelledby="l-design">
+    <h2 class="field__label" id="l-design">Design</h2>
+    <div class="field__body">
+      <figure class="fig">
+        <svg class="fig__plate fig__plate--wide" viewBox="0 0 760 224" role="img" aria-labelledby="fig-title fig-desc">
+          <title id="fig-title">The 2 × 2 design, and one participant’s twelve-trial sequence</title>
+          <desc id="fig-desc">Left: a two-by-two table of agent by condition, with AGENT A and AGENT B as rows and COND X and COND Y as columns; COND X cells are filled solid and COND Y cells are hatched. Right: twelve trials in order, each filled by its condition, with trial 04 marked as the trial in progress.</desc>
+
+          <defs>
+            <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <line class="fig__hatch-line" x1="0" y1="0" x2="0" y2="6"/>
+            </pattern>
+          </defs>
+
+          <!-- the design: agent by condition -->
+          <text class="fig__axis" x="136" y="16" text-anchor="middle">COND X</text>
+          <text class="fig__axis" x="238" y="16" text-anchor="middle">COND Y</text>
+          <text class="fig__axis" x="80" y="74" text-anchor="end">AGENT A</text>
+          <text class="fig__axis" x="80" y="132" text-anchor="end">AGENT B</text>
+
+          <rect class="fig__box fig__box--x" x="88" y="44" width="96" height="52"/>
+          <rect class="fig__box fig__box--y" x="190" y="44" width="96" height="52"/>
+          <rect class="fig__box fig__box--y" x="88" y="102" width="96" height="52"/>
+          <rect class="fig__box fig__box--x" x="190" y="102" width="96" height="52"/>
+
+          <!-- one participant's twelve trials, in the order they are run -->
+          <g class="fig__seq">
+            <g class="fig__bar">
+              <rect class="fig__box fig__box--x" x="308" y="44" width="34" height="128"/>
+              <text class="fig__hint" x="325" y="216">A · X</text>
+            </g>
+            <g class="fig__bar">
+              <rect class="fig__box fig__box--y" x="346" y="44" width="34" height="128"/>
+              <text class="fig__hint" x="363" y="216">B · Y</text>
+            </g>
+            <g class="fig__bar">
+              <rect class="fig__box fig__box--y" x="384" y="44" width="34" height="128"/>
+              <text class="fig__hint" x="401" y="216">A · Y</text>
+            </g>
+            <g class="fig__bar">
+              <rect class="fig__box fig__box--x" x="422" y="44" width="34" height="128"/>
+              <text class="fig__hint" x="439" y="216">B · X</text>
+            </g>
+            <g class="fig__bar">
+              <rect class="fig__box fig__box--x" x="460" y="44" width="34" height="128"/>
+              <text class="fig__hint" x="477" y="216">A · X</text>
+            </g>
+            <g class="fig__bar">
+              <rect class="fig__box fig__box--y" x="498" y="44" width="34" height="128"/>
+              <text class="fig__hint" x="515" y="216">A · Y</text>
+            </g>
+            <g class="fig__bar">
+              <rect class="fig__box fig__box--x" x="536" y="44" width="34" height="128"/>
+              <text class="fig__hint" x="553" y="216">B · X</text>
+            </g>
+            <g class="fig__bar">
+              <rect class="fig__box fig__box--y" x="574" y="44" width="34" height="128"/>
+              <text class="fig__hint" x="591" y="216">B · Y</text>
+            </g>
+            <g class="fig__bar">
+              <rect class="fig__box fig__box--x" x="612" y="44" width="34" height="128"/>
+              <text class="fig__hint" x="629" y="216">A · X</text>
+            </g>
+            <g class="fig__bar">
+              <rect class="fig__box fig__box--x" x="650" y="44" width="34" height="128"/>
+              <text class="fig__hint" x="667" y="216">B · X</text>
+            </g>
+            <g class="fig__bar">
+              <rect class="fig__box fig__box--y" x="688" y="44" width="34" height="128"/>
+              <text class="fig__hint" x="705" y="216">A · Y</text>
+            </g>
+            <g class="fig__bar">
+              <rect class="fig__box fig__box--y" x="726" y="44" width="34" height="128"/>
+              <text class="fig__hint" x="743" y="216">B · Y</text>
+            </g>
+
+            <line class="fig__rule" x1="308" y1="172.5" x2="760" y2="172.5"/>
+
+            <text class="fig__tick" x="325" y="196">01</text>
+            <text class="fig__tick" x="363" y="196">02</text>
+            <text class="fig__tick" x="401" y="196">03</text>
+            <text class="fig__tick" x="439" y="196">04</text>
+            <text class="fig__tick" x="477" y="196">05</text>
+            <text class="fig__tick" x="515" y="196">06</text>
+            <text class="fig__tick" x="553" y="196">07</text>
+            <text class="fig__tick" x="591" y="196">08</text>
+            <text class="fig__tick" x="629" y="196">09</text>
+            <text class="fig__tick" x="667" y="196">10</text>
+            <text class="fig__tick" x="705" y="196">11</text>
+            <text class="fig__tick" x="743" y="196">12</text>
+
+            <g class="fig__active">
+              <path class="fig__bracket" d="M422 34 V22 H456 V34"/>
+              <text class="fig__mark" x="439" y="14">04 / 12</text>
+            </g>
+          </g>
+        </svg>
+
+        <svg class="fig__plate fig__plate--compact" viewBox="0 0 360 252" role="img" aria-labelledby="fig-title-c fig-desc-c">
+          <title id="fig-title-c">The 2 × 2 design, and one participant’s twelve-trial sequence</title>
+          <desc id="fig-desc-c">Top: a two-by-two table of agent by condition, with AGENT A and AGENT B as rows and COND X and COND Y as columns; COND X cells are filled solid and COND Y cells are hatched. Bottom: twelve trials in order, each filled by its condition, with trial 04 marked as the trial in progress.</desc>
+
+          <defs>
+            <pattern id="hatch-c" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <line class="fig__hatch-line" x1="0" y1="0" x2="0" y2="6"/>
+            </pattern>
+          </defs>
+
+          <text class="fig__axis" x="116" y="12" text-anchor="middle">COND X</text>
+          <text class="fig__axis" x="212" y="12" text-anchor="middle">COND Y</text>
+          <text class="fig__axis" x="64" y="40" text-anchor="end">AGENT A</text>
+          <text class="fig__axis" x="64" y="80" text-anchor="end">AGENT B</text>
+
+          <rect class="fig__box fig__box--x" x="72" y="20" width="88" height="32"/>
+          <rect class="fig__box fig__box--yc" x="168" y="20" width="88" height="32"/>
+          <rect class="fig__box fig__box--yc" x="72" y="60" width="88" height="32"/>
+          <rect class="fig__box fig__box--x" x="168" y="60" width="88" height="32"/>
+
+          <line class="fig__rule" x1="20" y1="102" x2="341" y2="102"/>
+
+          <g class="fig__active">
+            <path class="fig__bracket" d="M101 140 V130 H125 V140"/>
+            <text class="fig__mark" x="113" y="122">04 / 12</text>
+          </g>
+
+          <g class="fig__bar"><rect class="fig__box fig__box--x" x="20" y="140" width="24" height="72"/></g>
+          <g class="fig__bar"><rect class="fig__box fig__box--yc" x="47" y="140" width="24" height="72"/></g>
+          <g class="fig__bar"><rect class="fig__box fig__box--yc" x="74" y="140" width="24" height="72"/></g>
+          <g class="fig__bar"><rect class="fig__box fig__box--x" x="101" y="140" width="24" height="72"/></g>
+          <g class="fig__bar"><rect class="fig__box fig__box--x" x="128" y="140" width="24" height="72"/></g>
+          <g class="fig__bar"><rect class="fig__box fig__box--yc" x="155" y="140" width="24" height="72"/></g>
+          <g class="fig__bar"><rect class="fig__box fig__box--x" x="182" y="140" width="24" height="72"/></g>
+          <g class="fig__bar"><rect class="fig__box fig__box--yc" x="209" y="140" width="24" height="72"/></g>
+          <g class="fig__bar"><rect class="fig__box fig__box--x" x="236" y="140" width="24" height="72"/></g>
+          <g class="fig__bar"><rect class="fig__box fig__box--x" x="263" y="140" width="24" height="72"/></g>
+          <g class="fig__bar"><rect class="fig__box fig__box--yc" x="290" y="140" width="24" height="72"/></g>
+          <g class="fig__bar"><rect class="fig__box fig__box--yc" x="317" y="140" width="24" height="72"/></g>
+
+          <line class="fig__rule" x1="20" y1="212.5" x2="341" y2="212.5"/>
+
+          <text class="fig__tick" x="32" y="230">01</text>
+          <text class="fig__tick" x="59" y="230">02</text>
+          <text class="fig__tick" x="86" y="230">03</text>
+          <text class="fig__tick" x="113" y="230">04</text>
+          <text class="fig__tick" x="140" y="230">05</text>
+          <text class="fig__tick" x="167" y="230">06</text>
+          <text class="fig__tick" x="194" y="230">07</text>
+          <text class="fig__tick" x="221" y="230">08</text>
+          <text class="fig__tick" x="248" y="230">09</text>
+          <text class="fig__tick" x="275" y="230">10</text>
+          <text class="fig__tick" x="302" y="230">11</text>
+          <text class="fig__tick" x="329" y="230">12</text>
+        </svg>
+        <figcaption>
+          <span class="fig__no">Fig. 1</span>
+          One participant’s run, shown at twelve trials. Each agent–condition pair
+          appears equally often, in a randomised order. Solid cells are
+          <strong>COND X</strong>, hatched cells are <strong>COND Y</strong>.
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="field" aria-labelledby="l-materials">
+    <h2 class="field__label" id="l-materials">Materials</h2>
+    <dl class="spec">
+      <div>
+        <dt>Hosts</dt>
+        <dd>Windows, Linux and macOS on Apple silicon. One native binary: no separate backend process, no bundled runtime.</dd>
       </div>
-      <div class="feature-grid">
-        <div class="feature">
-          <span class="num">01</span>
-          <h3>Private research toolkit</h3>
-          <p>Comply with academic rules and scientific lab procedures, 
-            stay private and interact with AI models.</p>
-        </div>
-        <div class="feature">
-          <span class="num">02</span>
-          <h3>Triple-recorded output</h3>
-          <p>Every trial lands in a per-experiment CSV, a JSONL audit
-          ledger and a full SQLite chat transcript.</p>
-        </div>
-        <div class="feature">
-          <span class="num">03</span>
-          <h3>Local and offline-first</h3>
-          <p>No telemetry, no account, no required network dependency beyond
-          the provider host you point it at, e.g., Ollama.</p>
-        </div>
-        <div class="feature">
-          <span class="num">04</span>
-          <h3>Read-only live dashboard</h3>
-          <p>An optional local web view of the running experiment.</p>
-        </div>
-        <div class="feature">
-          <span class="num">05</span>
-          <h3>Master-password vault</h3>
-          <p>Argon2id-hashed lock on the application with throttled retry
-          backoff.</p>
-        </div>
-        <div class="feature">
-          <span class="num">06</span>
-          <h3>Cross-platform releases</h3>
-          <p>Native builds for Windows, Linux, and Apple Silicon macOS.</p>
-        </div>
+      <div>
+        <dt>Model</dt>
+        <dd>Ollama, either on this machine or on a host you choose. No account, no telemetry.</dd>
+      </div>
+      <div>
+        <dt>Storage</dt>
+        <dd>Stays on this machine. Master-password vault, loopback-only dashboard, air-gap option.</dd>
+      </div>
+      <div>
+        <dt>Licence</dt>
+        <dd><span class="mono">AGPL-3.0</span>. Source and SHA-256 checksums with every release.</dd>
+      </div>
+    </dl>
+  </section>
+
+  <section class="field" aria-labelledby="l-procedure">
+    <h2 class="field__label" id="l-procedure">Procedure</h2>
+    <ol class="steps">
+      <li>
+        <h3>Set the design</h3>
+        <p>Agents, conditions, repetitions and the prompt set, defined once and reused across participants.</p>
+      </li>
+      <li>
+        <h3>Run the trials</h3>
+        <p>Participant ID, a countdown per trial, and timings captured per turn without being asked for.</p>
+      </li>
+      <li>
+        <h3>Close the run</h3>
+        <p>The event ledger is sealed with a summary and SHA-256 hashes, so a finished run cannot be edited quietly.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section class="field" aria-labelledby="l-output">
+    <h2 class="field__label" id="l-output">Output</h2>
+    <dl class="ledger">
+      <div>
+        <dt>exp_001.csv</dt>
+        <dd>One row per trial. Opens straight in R, Python, SPSS or JASP.</dd>
+      </div>
+      <div>
+        <dt>runs/&lt;id&gt;/events.jsonl</dt>
+        <dd>Append-only event ledger, hashed at close.</dd>
+      </div>
+      <div>
+        <dt>chat.sqlite</dt>
+        <dd>Turn-by-turn transcript of every trial, kept locally.</dd>
+      </div>
+    </dl>
+  </section>
+
+  <section class="field" id="researchers" aria-labelledby="l-researchers">
+    <h2 class="field__label" id="l-researchers">Researchers</h2>
+    <div class="field__body audiences">
+      <div class="audience">
+        <h3>Cognitive science, HCI, experimental psychology</h3>
+        <p>Within-subject designs, an IRB-facing security note, and output that drops into the analysis pipeline you already have.</p>
+      </div>
+      <div class="audience">
+        <h3>AI and ML research</h3>
+        <p>Model-behaviour comparison, time to first token, and the same design run air-gapped on local models.</p>
       </div>
     </div>
   </section>
 
-  <section id="research">
-    <div class="wrap">
-      <div class="section-head">
-        <span class="eyebrow">Two audiences, one instrument</span>
-        <h2>Read from your own field.</h2>
-      </div>
-      <div class="tracks">
-        <div class="track">
-          <span class="eyebrow argum">Cognitive science, HCI &amp; experimental psychology</span>
-          <h3>A proper within-subject protocol</h3>
-          <ul>
-            <li>Participant ID, per-trial timing, and a free-text final answer captured on a fixed schema</li>
-            <li>CSV output designed to drop straight into R, Python, SPSS, or JASP</li>
-            <li>A named privacy/security document written for IRB review</li>
-          </ul>
-        </div>
-        <div class="track">
-          <span class="eyebrow coop">AI &amp; ML researchers</span>
-          <h3>Comparing model-behavior trials</h3>
-          <ul>
-            <li>Runs against a local model provider — Ollama is a great way to produce results</li>
-            <li>Per-turn timing capture, time-to-first-token and prompt/eval token counts</li>
-            <li>Air-gapped evaluation runs against fully local models</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section id="architecture">
-    <div class="wrap">
-      <div class="section-head">
-        <span class="eyebrow">Under the hood</span>
-        <h2>A pure Rust backend, end to end.</h2>
-        <p>
-          The experiment engine, the desktop UI, and the local dashboard's
-          <code>axum</code> server all compile from one Rust codebase into a
-          single native binary — no separate backend process, no bundled
-          runtime, no interpreter. That same codebase targets Windows, Linux,
-          and macOS directly
-          <code>cargo</code>.
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <section class="cta-final">
-    <div class="wrap prose">
-      <span class="eyebrow">Get involved</span>
-      <h2>Under continuous development.</h2>
-      <p>
-        The project is under continuous development. We welcome input from the
-        scientific and research community to improve the software — study
-        designs it doesn't fit yet, recording formats that don't match your
-        analysis pipeline, and anything the privacy write-up should be more
-        careful about. For technical support and collaborations on the project,
-        contact us.
-      </p>
-      <div class="contact-row">
-        <a class="btn primary" href="https://github.com/humaipsy/humaipsy/issues">Open an issue</a>
-      </div>
-    </div>
-  </section>
 </main>
 
-<footer>
-  <div class="wrap">
-    <div class="license-line">
-      Copyright &copy; 2026 Lu&iacute;s Arandas and Olga Sutskova.<br>
-      Licensed under the <a href="https://github.com/humaipsy/humaipsy/blob/main/LICENSE">GNU Affero General Public License v3.0 (AGPL-3.0)</a>.
-    </div>
-    <div>
+<footer class="foot">
+  <div class="shell foot__inner">
+    <p>
+      Developed by Luís Arandas and Olga Sutskova. Under continuous development; a
+      study design it does not fit is the most useful thing to report.
+    </p>
+    <nav aria-label="Elsewhere">
       <a href="https://github.com/humaipsy/humaipsy">github.com/humaipsy/humaipsy</a>
-    </div>
+      <a href="https://github.com/humaipsy/humaipsy/blob/main/SECURITY.md">Security note</a>
+      <a href="https://github.com/humaipsy/humaipsy/issues">Open an issue</a>
+      <a href="https://github.com/humaipsy/humaipsy/blob/main/LICENSE">AGPL-3.0</a>
+    </nav>
   </div>
 </footer>
 
-<script src="script.js" defer></script>
 </body>
 </html>

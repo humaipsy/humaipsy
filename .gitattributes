@@ -8,3 +8,6 @@
 
 *.png binary
 *.ico binary
+# Self-hosted webfonts (docs/fonts). `text=auto` above would otherwise have Git
+# decide per file; a compressed font rewritten as text would be a corrupt font.
+*.woff2 binary
