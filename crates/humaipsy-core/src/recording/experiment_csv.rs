@@ -65,6 +65,11 @@ pub struct ExperimentDesignSnapshot {
     pub trials: u32,
     pub trial_seconds: u32,
     pub topic: String,
+    /// Whether this design's condition order is randomised rather than the fixed
+    /// alternating sequence. Reported per row in the existing `trial_random`
+    /// column, which used to be hardcoded to "no" — a constant that was a lie as
+    /// soon as the design could ask for randomisation.
+    pub randomised: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -341,6 +346,7 @@ fn base_metadata(state: &RecorderState) -> (ExperimentDesignSnapshot, Option<Ses
             trials: 2,
             trial_seconds: 120,
             topic: String::new(),
+            randomised: false,
         }),
         state.session.clone(),
         state.trial.clone(),
@@ -374,7 +380,7 @@ fn build_row(
         block_cb: "yes".to_string(),
         trial_label: design.topic.clone(),
         trial_time_secs: design.trial_seconds.to_string(),
-        trial_random: "no".to_string(),
+        trial_random: if design.randomised { "yes" } else { "no" }.to_string(),
         event: event.to_string(),
         timestamp: now_rfc3339_utc(),
         trial_elapsed_secs: trial_elapsed_secs().to_string(),
@@ -660,6 +666,7 @@ mod tests {
             trials: 2,
             trial_seconds: 120,
             topic: "Mental Health".to_string(),
+            randomised: false,
         }
     }
 
