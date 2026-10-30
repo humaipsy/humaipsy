@@ -147,15 +147,13 @@ p {
 }
 
 .masthead__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  flex-wrap: wrap;
   padding-block: clamp(20px, 2.6vw, 30px);
 }
 
 .wordmark {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   font-size: 19px;
   font-weight: 600;
   letter-spacing: -0.012em;
@@ -163,23 +161,6 @@ p {
 }
 .wordmark:hover {
   text-decoration: none;
-}
-
-.nav {
-  display: flex;
-  align-items: center;
-  gap: clamp(14px, 2vw, 28px);
-  font-size: 14px;
-  font-weight: 500;
-}
-.nav a {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  color: var(--ink-2);
-}
-.nav a:hover {
-  color: var(--ink);
 }
 
 .btn {
@@ -200,8 +181,8 @@ p {
   text-decoration: none;
   border-color: var(--ink);
 }
-/* Two classes so this outranks `.nav a` / `.foot a`, which are more specific
-   than `.btn` alone and would otherwise repaint the label in muted ink. */
+/* Two classes so this outranks `.foot a`, which is more specific than `.btn`
+   alone and would otherwise repaint the label in muted ink. */
 .btn.btn--primary {
   background: var(--ink);
   border-color: var(--ink);
@@ -582,16 +563,6 @@ figcaption .fig__no {
   }
 }
 
-@media (max-width: 460px) {
-  .masthead__bar {
-    gap: 12px;
-  }
-  .nav {
-    gap: 14px;
-    font-size: 13.5px;
-  }
-}
-
 /* ----------------------------------------------------------------- print -- */
 
 @media print {
@@ -605,7 +576,6 @@ figcaption .fig__no {
     --accent: #000;
     --accent-soft: #eee;
   }
-  .nav,
   .skip-link,
   .actions .btn--ghost,
   .fig__hint {
