@@ -27,7 +27,7 @@ use humaipsy_core::sync_ext::MutexExt;
 use humaipsy_core::chat_types::{ChatMessage, MessageSource, Room};
 use humaipsy_core::store::Store;
 
-use super::chat::ChatExample;
+use super::chat::{ChatExample, PendingReply};
 
 /// Chat SQLite connections, keyed by path and opened at most once per path —
 /// mirrors `InferenceEngine::from_host`'s cache in `humaipsy_core::ollama::engine`.
@@ -360,6 +360,10 @@ fn advance_to_next_trial(
     if state.session.running {
         end_trial(timed_out);
     }
+
+    // The previous trial is over: cancel anything still generating for it, so its
+    // answer can neither appear in nor be recorded against the next trial.
+    state.chat.advance_trial_epoch();
 
     let next_index = state.session.trial_index + 1;
     if next_index >= total_experiment_trials(&state.exp_design) {
@@ -880,6 +884,11 @@ fn spawn_ollama_opening_question(
     let history_size = app.conversation_history_size;
     let trace_context =
         inference_trace_context(session, "overview_chat.humai_agent.opening_question");
+    // The trial this question belongs to. If the experiment moves on before the
+    // answer arrives, the epoch no longer matches and the reply is dropped.
+    let trial_epoch = chat.trial_epoch();
+    let epoch_handle = chat.trial_epoch_handle();
+    let epoch_check = epoch_handle.clone();
 
     if let Ok(mut flag) = waiting.lock() {
         *flag = true;
@@ -890,11 +899,21 @@ fn spawn_ollama_opening_question(
             ollama_host,
         ));
         let agent = humaipsy_core::agent::HumaiPsyAgent::new(provider, model, assistant_prompt)
-            .with_history_size(history_size);
+            .with_history_size(history_size)
+            .with_stop_epoch((epoch_handle, trial_epoch));
 
         let out = agent
             .generate_opening_question(&participant_id, &topic, trace_context)
             .await;
+
+        // The trial that asked for this answer is over — do not record it, do not
+        // show it in the new trial, just stop waiting.
+        if epoch_check.load(Ordering::SeqCst) != trial_epoch {
+            if let Ok(mut flag) = waiting.lock() {
+                *flag = false;
+            }
+            return;
+        }
 
         let reply = match out {
             Ok(agent_reply) => {
@@ -927,7 +946,10 @@ fn spawn_ollama_opening_question(
             let ts = ChatExample::display_time_for_message(&reply);
             let _ = store.append_message(&room_id, &reply, &ts);
         }
-        let _ = tx.send(reply);
+        let _ = tx.send(PendingReply {
+            trial_epoch,
+            message: reply,
+        });
         if let Ok(mut flag) = waiting.lock() {
             *flag = false;
         }
@@ -941,6 +963,8 @@ fn spawn_ollama_opening_question(
 /// is writing into — a deleted conversation must never leave a session that still
 /// believes it is running, with nothing to append to.
 fn stop_experiment(app: &HumaiPsy, state: &mut OverviewChatUiState) {
+    // Anything still generating belongs to the run being stopped.
+    state.chat.advance_trial_epoch();
     humaipsy_core::timer::stop_and_reset_main_timer();
     end_trial(false);
     end_experiment();
@@ -1044,6 +1068,9 @@ fn start_experiment_from_play(app: &HumaiPsy, store: &Store, state: &mut Overvie
         &participant_id,
         state.exp_design.name.trim(),
     ));
+    // A fresh run is a fresh epoch: nothing generated for a previous run may
+    // arrive in this one.
+    state.chat.advance_trial_epoch();
 
     let design_snapshot = design_snapshot(&state.exp_design);
     let trial_desc = current_trial_descriptor_from_state(&state.exp_design, &state.session);
@@ -1236,7 +1263,7 @@ pub(crate) fn render_overview_panel(
     state.chat.room_mode_human_agent = human_to_agent_mode;
     state.chat.set_main_input_enabled(human_to_agent_mode);
 
-    for item in state.chat.inbox.drain() {
+    for item in state.chat.drain_current_replies() {
         let ts = ChatExample::display_time_for_message(&item);
         state.chat.message_timestamps.push(ts);
         state.chat.messages.push(item);
@@ -1841,14 +1868,24 @@ fn render_chat_rectangle(
                         let history_size = app.conversation_history_size;
                         let trace_context =
                             inference_trace_context(&state.session, "overview_chat.humai_agent.reply");
+                        // Tagged with the trial this answer belongs to; a reply that
+                        // arrives after the trial has ended is discarded (and the
+                        // request itself is aborted by the engine).
+                        let trial_epoch = state.chat.trial_epoch();
+                        let epoch_handle = state.chat.trial_epoch_handle();
+                        let epoch_check = epoch_handle.clone();
                         if model.is_empty() {
-                            let _ = tx.send(ChatMessage {
-                                content: "Please select a global Ollama model in Settings.".to_string(),
-                                from: Some("System".to_string()),
-                                correlation: None,
-                                source: MessageSource::System,
-                                api_auto_respond: false,
-                                assistant_generation: None,
+                            let _ = tx.send(PendingReply {
+                                trial_epoch,
+                                message: ChatMessage {
+                                    content: "Please select a global Ollama model in Settings."
+                                        .to_string(),
+                                    from: Some("System".to_string()),
+                                    correlation: None,
+                                    source: MessageSource::System,
+                                    api_auto_respond: false,
+                                    assistant_generation: None,
+                                },
                             });
                         } else {
                             if let Ok(mut flag) = waiting.lock() {
@@ -1865,10 +1902,21 @@ fn render_chat_rectangle(
                                     model,
                                     assistant_prompt,
                                 )
-                                .with_history_size(history_size);
+                                .with_history_size(history_size)
+                                .with_stop_epoch((epoch_handle, trial_epoch));
                                 let out = agent
                                     .reply_from_memory(&memory_snapshot, trace_context)
                                     .await;
+
+                                // Trial over: drop the answer instead of recording it
+                                // against the trial that is now current.
+                                if epoch_check.load(Ordering::SeqCst) != trial_epoch {
+                                    if let Ok(mut flag) = waiting.lock() {
+                                        *flag = false;
+                                    }
+                                    return;
+                                }
+
                                 let reply = match out {
                                     Ok(agent_reply) => {
                                         record_ai_transcript(
@@ -1902,7 +1950,10 @@ fn render_chat_rectangle(
                                     let ts = ChatExample::display_time_for_message(&reply);
                                     let _ = store.append_message(&room_id, &reply, &ts);
                                 }
-                                let _ = tx.send(reply);
+                                let _ = tx.send(PendingReply {
+                                    trial_epoch,
+                                    message: reply,
+                                });
                                 if let Ok(mut flag) = waiting.lock() {
                                     *flag = false;
                                 }

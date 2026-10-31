@@ -5,6 +5,7 @@
 // egui into the engine crate.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use egui::Ui;
@@ -25,7 +26,7 @@ struct RenameRoomModalState {
 pub struct ChatExample {
     pub messages: Vec<ChatMessage>,
     pub message_timestamps: Vec<String>,
-    pub inbox: UiInbox<ChatMessage>,
+    pub inbox: UiInbox<PendingReply>,
     pub input_text: String,
     pub waiting_for_response: Arc<std::sync::Mutex<bool>>,
     pub main_input_enabled: bool,
@@ -33,6 +34,12 @@ pub struct ChatExample {
     pub rooms: Vec<Room>,
     pub selected_room: Option<String>,
     pub room_mode_human_agent: bool,
+
+    /// Bumped whenever the experiment moves on — a new run, a new trial, or a
+    /// stop. An inference request captures the value it started with: the engine
+    /// aborts it once the value changes, and the reply it carries is discarded by
+    /// the UI, so a slow answer can never surface in the next trial.
+    trial_epoch: Arc<AtomicU64>,
 
     rename_room: RenameRoomModalState,
     /// When the Copy button last put the transcript on the clipboard, as egui's
@@ -50,6 +57,15 @@ pub struct RoomDeletion {
     /// The room was the one on screen, i.e. the conversation the experiment was
     /// appending to.
     pub was_selected: bool,
+}
+
+/// A reply travelling from a spawned inference task back to the UI, tagged with
+/// the trial it was requested for. The UI drops anything whose trial has already
+/// ended, which is what keeps a slow answer out of the next trial's transcript.
+#[derive(Clone, Debug)]
+pub struct PendingReply {
+    pub trial_epoch: u64,
+    pub message: ChatMessage,
 }
 
 impl Default for ChatExample {
@@ -389,6 +405,7 @@ impl ChatExample {
             rooms: Vec::new(),
             selected_room: None,
             room_mode_human_agent: true,
+            trial_epoch: Arc::new(AtomicU64::new(0)),
             rename_room: RenameRoomModalState::default(),
             transcript_copied_at: None,
         }
@@ -401,6 +418,47 @@ impl ChatExample {
 
     pub fn waiting_for_response(&self) -> &Arc<std::sync::Mutex<bool>> {
         &self.waiting_for_response
+    }
+
+    /// The trial an inference request started now belongs to. Capture it before
+    /// spawning the task and send it back with the reply.
+    pub fn trial_epoch(&self) -> u64 {
+        self.trial_epoch.load(Ordering::SeqCst)
+    }
+
+    /// Shared handle for the cancellation check the engine performs while
+    /// streaming (see [`humaipsy_core::ollama::OllamaStopEpoch`]).
+    pub fn trial_epoch_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.trial_epoch)
+    }
+
+    /// Moves the chat on to a new trial: anything still generating for the
+    /// previous one is cancelled, and its reply is discarded instead of being
+    /// shown (or recorded) under the new trial.
+    pub fn advance_trial_epoch(&self) {
+        self.trial_epoch.fetch_add(1, Ordering::SeqCst);
+        // Any reply still being awaited belongs to the trial that just ended, so
+        // the "waiting for assistant response" spinner must stop with it rather
+        // than hang around into the new trial.
+        if let Ok(mut flag) = self.waiting_for_response.lock() {
+            *flag = false;
+        }
+    }
+
+    /// Drains the inbox, keeping only replies requested for the current trial.
+    ///
+    /// A reply tagged with an older epoch belongs to a trial that has already
+    /// ended — typically a message sent at second 18 of a 20-second trial whose
+    /// answer finished after the clock ran out. Dropping it here is what keeps
+    /// that answer out of the next trial's transcript.
+    pub fn drain_current_replies(&self) -> Vec<ChatMessage> {
+        let current = self.trial_epoch();
+        self.inbox
+            .drain()
+            .into_iter()
+            .filter(|pending| pending.trial_epoch == current)
+            .map(|pending| pending.message)
+            .collect()
     }
 
     pub fn set_main_input_enabled(&mut self, enabled: bool) {
@@ -469,5 +527,69 @@ mod tests {
         assert!(chat.transcript_copied_recently(10.5));
         assert!(chat.transcript_copied_recently(11.9));
         assert!(!chat.transcript_copied_recently(12.0));
+    }
+
+    fn pending(epoch: u64, content: &str) -> PendingReply {
+        PendingReply {
+            trial_epoch: epoch,
+            message: message(content, Some("NO_NAME_2")),
+        }
+    }
+
+    #[test]
+    fn trial_epoch_only_moves_forward_and_is_shared_with_the_engine() {
+        let chat = ChatExample::new();
+        assert_eq!(chat.trial_epoch(), 0);
+
+        // The engine's cancellation check must observe the bump through the same
+        // handle the request captured.
+        let handle = chat.trial_epoch_handle();
+        chat.advance_trial_epoch();
+        assert_eq!(chat.trial_epoch(), 1);
+        assert_eq!(handle.load(Ordering::SeqCst), 1);
+
+        chat.advance_trial_epoch();
+        assert_eq!(chat.trial_epoch(), 2);
+    }
+
+    #[test]
+    fn a_reply_from_a_finished_trial_never_reaches_the_chat() {
+        // The scenario: the participant sends at second 18 of a 20-second trial,
+        // the clock runs out, the trial advances, and only then does the model
+        // finish. Its answer must not appear in the new trial.
+        let chat = ChatExample::new();
+        let tx = chat.inbox.sender();
+        tx.send(pending(0, "answer for the trial that just ended"))
+            .unwrap();
+
+        // The trial ends: the epoch moves on before the reply is drained.
+        chat.advance_trial_epoch();
+
+        let kept: Vec<String> = chat
+            .drain_current_replies()
+            .into_iter()
+            .map(|message| message.content)
+            .collect();
+        assert!(
+            kept.is_empty(),
+            "a reply requested for the previous trial must be dropped, got {kept:?}"
+        );
+    }
+
+    #[test]
+    fn a_reply_requested_for_the_current_trial_is_kept() {
+        let chat = ChatExample::new();
+        let tx = chat.inbox.sender();
+        chat.advance_trial_epoch();
+        chat.advance_trial_epoch();
+        tx.send(pending(2, "answer for this trial")).unwrap();
+        tx.send(pending(1, "late answer for an older trial")).unwrap();
+
+        let kept: Vec<String> = chat
+            .drain_current_replies()
+            .into_iter()
+            .map(|message| message.content)
+            .collect();
+        assert_eq!(kept, vec!["answer for this trial"]);
     }
 }
