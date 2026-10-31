@@ -35,6 +35,21 @@ pub struct ChatExample {
     pub room_mode_human_agent: bool,
 
     rename_room: RenameRoomModalState,
+    /// When the Copy button last put the transcript on the clipboard, as egui's
+    /// frame clock in seconds — used to show a short "Copied" confirmation
+    /// without adding a modal or a toast system.
+    transcript_copied_at: Option<f64>,
+}
+
+/// What deleting a room from the sidebar did, returned to the caller so it can
+/// react — an experiment writing into the deleted conversation must not be left
+/// believing it is still running.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoomDeletion {
+    pub id: String,
+    /// The room was the one on screen, i.e. the conversation the experiment was
+    /// appending to.
+    pub was_selected: bool,
 }
 
 impl Default for ChatExample {
@@ -62,7 +77,13 @@ impl ChatExample {
     /// reuses the one the caller already has. `participant_id` is the current
     /// experiment design's participant ID, owned by the caller's
     /// `OverviewChatUiState` (this module doesn't depend on that type).
-    pub fn sidebar_ui(&mut self, ui: &mut Ui, store: &humaipsy_core::store::Store, participant_id: &str) {
+    pub fn sidebar_ui(
+        &mut self,
+        ui: &mut Ui,
+        store: &humaipsy_core::store::Store,
+        participant_id: &str,
+    ) -> Option<RoomDeletion> {
+        let mut deleted_room: Option<RoomDeletion> = None;
         let rooms_section_height = ui.available_height();
         let rooms_list_height = 200.0;
 
@@ -163,11 +184,13 @@ impl ChatExample {
                             });
 
                         if let Some(id) = delete_room_id {
+                            let was_selected = self.selected_room.as_deref() == Some(id.as_str());
                             self.rooms.retain(|r| r.id != id);
                             let _ = store.delete_conversation(&id);
-                            if self.selected_room.as_deref() == Some(id.as_str()) {
+                            if was_selected {
                                 self.selected_room = self.rooms.first().map(|r| r.id.clone());
                             }
+                            deleted_room = Some(RoomDeletion { id, was_selected });
                         }
                     });
                     ui.separator();
@@ -176,6 +199,56 @@ impl ChatExample {
         );
 
         self.render_rename_room_modal(ui.ctx(), store);
+
+        deleted_room
+    }
+
+    /// The whole visible transcript as plain text: `HH:MM:SS Sender` on its own
+    /// line, the message body under it, and a blank line between messages.
+    ///
+    /// Includes system notices ("Moved to condition 1 (COOP), trial 2"), because
+    /// they are what a researcher needs when reading a run back.
+    pub fn transcript_text(&self) -> String {
+        let mut out = String::new();
+        for (index, message) in self.messages.iter().enumerate() {
+            let timestamp = self
+                .message_timestamps
+                .get(index)
+                .map(String::as_str)
+                .unwrap_or("");
+            let sender = message.from.as_deref().unwrap_or("").trim();
+            let header = match (timestamp.is_empty(), sender.is_empty()) {
+                (false, false) => format!("{timestamp} {sender}"),
+                (false, true) => timestamp.to_string(),
+                (true, false) => sender.to_string(),
+                (true, true) => String::new(),
+            };
+            if !header.is_empty() {
+                out.push_str(&header);
+                out.push('\n');
+            }
+            out.push_str(&message.content);
+            out.push_str("\n\n");
+        }
+
+        let trimmed = out.trim_end();
+        if trimmed.is_empty() {
+            String::new()
+        } else {
+            format!("{trimmed}\n")
+        }
+    }
+
+    /// Records that the transcript was copied at `now` (egui's frame clock).
+    pub fn mark_transcript_copied(&mut self, now: f64) {
+        self.transcript_copied_at = Some(now);
+    }
+
+    /// True for a couple of seconds after [`Self::mark_transcript_copied`], while
+    /// the "Copied" confirmation should be visible.
+    pub fn transcript_copied_recently(&self, now: f64) -> bool {
+        self.transcript_copied_at
+            .is_some_and(|copied_at| now - copied_at < 2.0)
     }
 
     fn section_separator(ui: &mut Ui) {
@@ -317,6 +390,7 @@ impl ChatExample {
             selected_room: None,
             room_mode_human_agent: true,
             rename_room: RenameRoomModalState::default(),
+            transcript_copied_at: None,
         }
     }
 
@@ -333,4 +407,67 @@ impl ChatExample {
         self.main_input_enabled = enabled;
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(content: &str, from: Option<&str>) -> ChatMessage {
+        ChatMessage {
+            content: content.to_string(),
+            from: from.map(str::to_string),
+            correlation: None,
+            source: MessageSource::System,
+            api_auto_respond: false,
+            assistant_generation: None,
+        }
+    }
+
+    #[test]
+    fn transcript_text_keeps_sender_timestamp_and_order() {
+        let mut chat = ChatExample::new();
+        chat.hydrate(
+            vec![
+                message("No, I like aesthetics", Some("LUIS3")),
+                message("Moved to condition 1 (COOP), trial 1.", Some("System")),
+                message("No sender here", None),
+            ],
+            vec![
+                "00:35:37".to_string(),
+                "00:35:43".to_string(),
+                "00:35:44".to_string(),
+            ],
+        );
+
+        let expected = concat!(
+            "00:35:37 LUIS3\n",
+            "No, I like aesthetics\n\n",
+            "00:35:43 System\n",
+            "Moved to condition 1 (COOP), trial 1.\n\n",
+            "00:35:44\n",
+            "No sender here\n",
+        );
+        assert_eq!(chat.transcript_text(), expected);
+    }
+
+    #[test]
+    fn transcript_text_ends_with_exactly_one_newline() {
+        let chat = ChatExample::new();
+        let text = chat.transcript_text();
+        assert!(text.contains("humaipsy Started"));
+        assert!(text.ends_with('\n'));
+        assert!(!text.ends_with("\n\n"));
+    }
+
+    #[test]
+    fn copy_feedback_shows_for_two_seconds() {
+        let mut chat = ChatExample::new();
+        assert!(!chat.transcript_copied_recently(10.0));
+
+        chat.mark_transcript_copied(10.0);
+        assert!(chat.transcript_copied_recently(10.5));
+        assert!(chat.transcript_copied_recently(11.9));
+        assert!(!chat.transcript_copied_recently(12.0));
+    }
 }

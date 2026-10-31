@@ -934,6 +934,28 @@ fn spawn_ollama_opening_question(
     });
 }
 
+/// Puts the session back to "not started": clock reset, the open trial and run
+/// closed in the recorder, and every per-run flag cleared.
+///
+/// Shared by the timer's × button and by deleting the conversation an experiment
+/// is writing into — a deleted conversation must never leave a session that still
+/// believes it is running, with nothing to append to.
+fn stop_experiment(app: &HumaiPsy, state: &mut OverviewChatUiState) {
+    humaipsy_core::timer::stop_and_reset_main_timer();
+    end_trial(false);
+    end_experiment();
+    state.session.running = false;
+    state.session.configured = false;
+    state.session.trial_index = 0;
+    state.session.trial_memory_start_idx = 0;
+    state.session.trial_timeout_popup_open = false;
+    state.session.awaiting_final_answer = false;
+    state.session.finished_popup_open = false;
+    state.session.experiment_complete = false;
+    state.session.randomisation_seed = None;
+    update_web_status(app, state);
+}
+
 fn start_experiment_from_play(app: &HumaiPsy, store: &Store, state: &mut OverviewChatUiState) {
     if state.session.running || state.session.awaiting_final_answer {
         return;
@@ -1292,9 +1314,22 @@ pub(crate) fn render_overview_panel(
                             .show(ui, |ui| {
                                 ui.set_min_height(row_height);
                                 ui.set_height(row_height);
-                                state
-                                    .chat
-                                    .sidebar_ui(ui, &store, &state.exp_design.participant_id);
+                                let deleted_room = state.chat.sidebar_ui(
+                                    ui,
+                                    &store,
+                                    &state.exp_design.participant_id,
+                                );
+                                // Deleting the conversation the experiment is appending to
+                                // stops it: otherwise the session would keep "running" with
+                                // no room to write into, and the next trial's messages would
+                                // land in whichever room happened to be selected next.
+                                if let Some(deletion) = deleted_room
+                                    && deletion.was_selected
+                                    && state.session.configured
+                                    && !state.session.experiment_complete
+                                {
+                                    stop_experiment(app, state);
+                                }
                             });
                     },
                 );
@@ -1520,18 +1555,7 @@ fn render_chat_rectangle(
                                             .on_hover_text("Stop the experiment and reset the timer to 00:00:00")
                                             .clicked()
                                         {
-                                            humaipsy_core::timer::stop_and_reset_main_timer();
-                                            end_trial(false);
-                                            end_experiment();
-                                            state.session.running = false;
-                                            state.session.configured = false;
-                                            state.session.trial_index = 0;
-                                            state.session.trial_memory_start_idx = 0;
-                                            state.session.trial_timeout_popup_open = false;
-                                            state.session.awaiting_final_answer = false;
-                                            state.session.finished_popup_open = false;
-                                            state.session.experiment_complete = false;
-                                            update_web_status(app, state);
+                                            stop_experiment(app, state);
                                         }
 
                                         let pause_btn = egui::Button::new(
@@ -1710,29 +1734,57 @@ fn render_chat_rectangle(
             ui.separator();
             ui.add_space(6.0);
 
-            ui.add_enabled_ui(
-                (human_to_agent_mode && !state.session.experiment_complete)
-                    || state.session.awaiting_final_answer,
-                |ui| {
-                ui.horizontal(|ui| {
+            ui.horizontal(|ui| {
                     ui.add_space(12.0);
-                    let input_width = (ui.available_width() - 72.0).max(220.0);
+                    let copy_width = 56.0;
+                    let input_width =
+                        (ui.available_width() - 52.0 - copy_width - 24.0).max(220.0);
                     let hint = if state.session.awaiting_final_answer {
                         "Answer the final question"
                     } else {
                         "Type a message"
                     };
-                    let response = ui.add_sized(
-                        egui::vec2(input_width, input_row_height),
-                        egui::TextEdit::singleline(&mut state.chat.input_text).hint_text(hint),
+                    // Only the input and Send are gated on a message being
+                    // sendable; Copy stays available because copying the
+                    // transcript is most useful once the experiment is over.
+                    let mut send_clicked = false;
+                    ui.add_enabled_ui(
+                        (human_to_agent_mode && !state.session.experiment_complete)
+                            || state.session.awaiting_final_answer,
+                        |ui| {
+                            let response = ui.add_sized(
+                                egui::vec2(input_width, input_row_height),
+                                egui::TextEdit::singleline(&mut state.chat.input_text)
+                                    .hint_text(hint),
+                            );
+                            send_clicked = ui
+                                .add_sized(
+                                    egui::vec2(52.0, input_row_height),
+                                    egui::Button::new("Send"),
+                                )
+                                .clicked()
+                                || (response.lost_focus()
+                                    && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                        },
                     );
-                    let send_clicked = ui
+
+                    if ui
                         .add_sized(
-                            egui::vec2(52.0, input_row_height),
-                            egui::Button::new("Send"),
+                            egui::vec2(copy_width, input_row_height),
+                            egui::Button::new("Copy"),
                         )
+                        .on_hover_text("Copy the whole chat transcript to the clipboard")
                         .clicked()
-                        || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                    {
+                        ui.ctx().copy_text(state.chat.transcript_text());
+                        state.chat.mark_transcript_copied(ui.input(|i| i.time));
+                    }
+                    let now = ui.input(|i| i.time);
+                    if state.chat.transcript_copied_recently(now) {
+                        ui.label(egui::RichText::new("Copied").small().weak());
+                        ui.ctx()
+                            .request_repaint_after(Duration::from_millis(200));
+                    }
 
                     if send_clicked && !state.chat.input_text.trim().is_empty() {
                         let message_text = state.chat.input_text.trim().to_string();
@@ -1859,8 +1911,7 @@ fn render_chat_rectangle(
                         }
                     }
                 });
-                ui.add_space(8.0);
-            });
+            ui.add_space(8.0);
         });
 }
 
