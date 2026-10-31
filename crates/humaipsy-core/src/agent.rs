@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::metrics::InferenceSnapshot;
-use crate::ollama::InferenceTimingSnapshot;
+use crate::ollama::{InferenceTimingSnapshot, OllamaStopEpoch};
 use crate::provider::{ChatRequest, Provider, token_budget};
 use crate::recording::timing::InferenceTraceContext;
 
@@ -35,6 +35,10 @@ pub struct HumaiPsyAgent {
     /// count window (see `format_memory_input`). `None` (the default) means
     /// no additional trimming — behavior identical to before this existed.
     token_budget: Option<usize>,
+    /// Cooperative cancellation for the request this agent issues: the engine
+    /// aborts the call once the shared epoch differs from the captured one.
+    /// `None` (the default) means the request always runs to completion.
+    stop_epoch: Option<OllamaStopEpoch>,
 }
 
 impl HumaiPsyAgent {
@@ -46,7 +50,19 @@ impl HumaiPsyAgent {
             history_size: 5,
             max_sentences: 5,
             token_budget: None,
+            stop_epoch: None,
         }
+    }
+
+    /// Cancels the request cooperatively: as soon as the shared epoch differs from
+    /// `stop_epoch`'s captured value the engine stops streaming and returns an
+    /// error instead of a reply.
+    ///
+    /// The UI uses this to end a reply that belongs to a trial which is already
+    /// over, so it can neither be shown in nor recorded against the next trial.
+    pub fn with_stop_epoch(mut self, stop_epoch: OllamaStopEpoch) -> Self {
+        self.stop_epoch = Some(stop_epoch);
+        self
     }
 
     pub fn with_history_size(mut self, history_size: usize) -> Self {
@@ -87,7 +103,7 @@ impl HumaiPsyAgent {
                 instruction: &instruction,
                 input: &input,
                 max_output_tokens: None,
-                stop_epoch: None,
+                stop_epoch: self.stop_epoch.clone(),
                 trace_context,
             })
             .await
@@ -118,7 +134,7 @@ impl HumaiPsyAgent {
                 instruction: &instruction,
                 input: &input,
                 max_output_tokens: None,
-                stop_epoch: None,
+                stop_epoch: self.stop_epoch.clone(),
                 trace_context,
             })
             .await

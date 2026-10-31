@@ -154,7 +154,7 @@ humaipsy/                  UI binary — depends on humaipsy-core and humaipsy-w
                               timer controls (Play starts a fresh run or resumes a pause, Pause
                               only stops the clock, X stops and resets, >> advances and resets
                               the new trial's clock), agent name/prompt fields and the
-                              Randomisation Condition start selector, CSV export shortcut,
+                              Randomisation Condition order selector, CSV export shortcut,
                               chat room UI, participant-ID modal, the egui_tiles
                               OverviewPane/Behavior for the sidebar/chat split.
                               Orchestration state (OverviewChatUiState: current trial, chat
@@ -177,11 +177,30 @@ It implements a within-subject design: up to [`MAX_CONDITIONS`] = 2 named condit
 (`COOP` — Cooperative, `ARGUM` — Argumentative), each mapped to a distinct system
 prompt (`HUMAIPSY_COOP_AGENT_PROMPT` / `HUMAIPSY_ARGUM_AGENT_PROMPT` env vars, defaults in
 `humaipsy/src/app_model.rs`), with a researcher-configurable number of trials per
-condition. Condition order is counterbalanced by parity of the participant ID's
-trailing digits (even IDs run COOP→ARGUM, odd IDs run ARGUM→COOP) so consecutive
-participants don't share an order bias. The Design tab's **Randomisation Condition**
-selector can override the starting condition explicitly (Condition 1 = COOP,
-Condition 2 = ARGUM), which is how a researcher chooses which agent speaks first.
+condition. Condition order is one of three modes, chosen on the Design tab's
+**Randomisation Condition** selector through
+`humaipsy_core::experiment::trial_descriptor_for_order`:
+
+- **Condition 1** (the default) and **Condition 2** are fixed alternating
+  sequences: they pick which condition speaks first, and the rest alternate from
+  there.
+- **Random** is permuted-block randomisation. A block is one trial of every
+  condition, shuffled within the block from a seed derived from the participant ID
+  and the design name (`randomisation_seed`), so every condition still runs exactly
+  "Trials per condition" times while the order is unpredictable to both the
+  participant and the experimenter — the randomised assignment a randomised
+  controlled trial relies on. The seed is drawn once, when the experiment starts,
+  and kept on the session: the same participant always draws the same order (a run
+  stays resumable and auditable), and editing the Participant ID field mid-run
+  cannot relabel a trial already recorded into the CSV. Every row also reports the
+  mode in the CSV's `trial_random` column (`yes`/`no`), which used to be hardcoded
+  to `no`.
+
+The engine still carries `trial_descriptor(index, participant_id, conditions)`, the
+older parity-based counterbalancing helper (even IDs COOP→ARGUM, odd IDs
+ARGUM→COOP). The Design tab does not use it — the selector above drives a run — so
+it remains as an API for a caller that wants parity assignment rather than an
+explicit choice.
 Each condition's agent also has a configurable name (defaults `NO_NAME_1` / `NO_NAME_2`);
 the name is embedded in that agent's system prompt and stored as the transcript's
 sender label, so a transcript attributes each reply to the agent that produced it.

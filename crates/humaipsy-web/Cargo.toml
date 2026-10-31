@@ -1,7 +1,7 @@
 [package]
 name = "humaipsy-web"
 description = "Local read-only browser dashboard for a running HumaiPsy instance: serves plain HTML/JS/CSS and a small JSON API over the chat Store."
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 rust-version = "1.95"
 license = "AGPL-3.0-only"

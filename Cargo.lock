@@ -1621,7 +1621,7 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "humaipsy"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "eframe",
@@ -1641,7 +1641,7 @@ dependencies = [
 
 [[package]]
 name = "humaipsy-core"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1664,7 +1664,7 @@ dependencies = [
 
 [[package]]
 name = "humaipsy-web"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "axum",

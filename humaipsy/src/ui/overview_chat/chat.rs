@@ -5,6 +5,7 @@
 // egui into the engine crate.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use egui::Ui;
@@ -25,7 +26,7 @@ struct RenameRoomModalState {
 pub struct ChatExample {
     pub messages: Vec<ChatMessage>,
     pub message_timestamps: Vec<String>,
-    pub inbox: UiInbox<ChatMessage>,
+    pub inbox: UiInbox<PendingReply>,
     pub input_text: String,
     pub waiting_for_response: Arc<std::sync::Mutex<bool>>,
     pub main_input_enabled: bool,
@@ -34,7 +35,37 @@ pub struct ChatExample {
     pub selected_room: Option<String>,
     pub room_mode_human_agent: bool,
 
+    /// Bumped whenever the experiment moves on — a new run, a new trial, or a
+    /// stop. An inference request captures the value it started with: the engine
+    /// aborts it once the value changes, and the reply it carries is discarded by
+    /// the UI, so a slow answer can never surface in the next trial.
+    trial_epoch: Arc<AtomicU64>,
+
     rename_room: RenameRoomModalState,
+    /// When the Copy button last put the transcript on the clipboard, as egui's
+    /// frame clock in seconds — used to show a short "Copied" confirmation
+    /// without adding a modal or a toast system.
+    transcript_copied_at: Option<f64>,
+}
+
+/// What deleting a room from the sidebar did, returned to the caller so it can
+/// react — an experiment writing into the deleted conversation must not be left
+/// believing it is still running.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoomDeletion {
+    pub id: String,
+    /// The room was the one on screen, i.e. the conversation the experiment was
+    /// appending to.
+    pub was_selected: bool,
+}
+
+/// A reply travelling from a spawned inference task back to the UI, tagged with
+/// the trial it was requested for. The UI drops anything whose trial has already
+/// ended, which is what keeps a slow answer out of the next trial's transcript.
+#[derive(Clone, Debug)]
+pub struct PendingReply {
+    pub trial_epoch: u64,
+    pub message: ChatMessage,
 }
 
 impl Default for ChatExample {
@@ -62,7 +93,13 @@ impl ChatExample {
     /// reuses the one the caller already has. `participant_id` is the current
     /// experiment design's participant ID, owned by the caller's
     /// `OverviewChatUiState` (this module doesn't depend on that type).
-    pub fn sidebar_ui(&mut self, ui: &mut Ui, store: &humaipsy_core::store::Store, participant_id: &str) {
+    pub fn sidebar_ui(
+        &mut self,
+        ui: &mut Ui,
+        store: &humaipsy_core::store::Store,
+        participant_id: &str,
+    ) -> Option<RoomDeletion> {
+        let mut deleted_room: Option<RoomDeletion> = None;
         let rooms_section_height = ui.available_height();
         let rooms_list_height = 200.0;
 
@@ -163,11 +200,13 @@ impl ChatExample {
                             });
 
                         if let Some(id) = delete_room_id {
+                            let was_selected = self.selected_room.as_deref() == Some(id.as_str());
                             self.rooms.retain(|r| r.id != id);
                             let _ = store.delete_conversation(&id);
-                            if self.selected_room.as_deref() == Some(id.as_str()) {
+                            if was_selected {
                                 self.selected_room = self.rooms.first().map(|r| r.id.clone());
                             }
+                            deleted_room = Some(RoomDeletion { id, was_selected });
                         }
                     });
                     ui.separator();
@@ -176,6 +215,56 @@ impl ChatExample {
         );
 
         self.render_rename_room_modal(ui.ctx(), store);
+
+        deleted_room
+    }
+
+    /// The whole visible transcript as plain text: `HH:MM:SS Sender` on its own
+    /// line, the message body under it, and a blank line between messages.
+    ///
+    /// Includes system notices ("Moved to condition 1 (COOP), trial 2"), because
+    /// they are what a researcher needs when reading a run back.
+    pub fn transcript_text(&self) -> String {
+        let mut out = String::new();
+        for (index, message) in self.messages.iter().enumerate() {
+            let timestamp = self
+                .message_timestamps
+                .get(index)
+                .map(String::as_str)
+                .unwrap_or("");
+            let sender = message.from.as_deref().unwrap_or("").trim();
+            let header = match (timestamp.is_empty(), sender.is_empty()) {
+                (false, false) => format!("{timestamp} {sender}"),
+                (false, true) => timestamp.to_string(),
+                (true, false) => sender.to_string(),
+                (true, true) => String::new(),
+            };
+            if !header.is_empty() {
+                out.push_str(&header);
+                out.push('\n');
+            }
+            out.push_str(&message.content);
+            out.push_str("\n\n");
+        }
+
+        let trimmed = out.trim_end();
+        if trimmed.is_empty() {
+            String::new()
+        } else {
+            format!("{trimmed}\n")
+        }
+    }
+
+    /// Records that the transcript was copied at `now` (egui's frame clock).
+    pub fn mark_transcript_copied(&mut self, now: f64) {
+        self.transcript_copied_at = Some(now);
+    }
+
+    /// True for a couple of seconds after [`Self::mark_transcript_copied`], while
+    /// the "Copied" confirmation should be visible.
+    pub fn transcript_copied_recently(&self, now: f64) -> bool {
+        self.transcript_copied_at
+            .is_some_and(|copied_at| now - copied_at < 2.0)
     }
 
     fn section_separator(ui: &mut Ui) {
@@ -316,7 +405,9 @@ impl ChatExample {
             rooms: Vec::new(),
             selected_room: None,
             room_mode_human_agent: true,
+            trial_epoch: Arc::new(AtomicU64::new(0)),
             rename_room: RenameRoomModalState::default(),
+            transcript_copied_at: None,
         }
     }
 
@@ -329,8 +420,176 @@ impl ChatExample {
         &self.waiting_for_response
     }
 
+    /// The trial an inference request started now belongs to. Capture it before
+    /// spawning the task and send it back with the reply.
+    pub fn trial_epoch(&self) -> u64 {
+        self.trial_epoch.load(Ordering::SeqCst)
+    }
+
+    /// Shared handle for the cancellation check the engine performs while
+    /// streaming (see [`humaipsy_core::ollama::OllamaStopEpoch`]).
+    pub fn trial_epoch_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.trial_epoch)
+    }
+
+    /// Moves the chat on to a new trial: anything still generating for the
+    /// previous one is cancelled, and its reply is discarded instead of being
+    /// shown (or recorded) under the new trial.
+    pub fn advance_trial_epoch(&self) {
+        self.trial_epoch.fetch_add(1, Ordering::SeqCst);
+        // Any reply still being awaited belongs to the trial that just ended, so
+        // the "waiting for assistant response" spinner must stop with it rather
+        // than hang around into the new trial.
+        if let Ok(mut flag) = self.waiting_for_response.lock() {
+            *flag = false;
+        }
+    }
+
+    /// Drains the inbox, keeping only replies requested for the current trial.
+    ///
+    /// A reply tagged with an older epoch belongs to a trial that has already
+    /// ended — typically a message sent at second 18 of a 20-second trial whose
+    /// answer finished after the clock ran out. Dropping it here is what keeps
+    /// that answer out of the next trial's transcript.
+    pub fn drain_current_replies(&self) -> Vec<ChatMessage> {
+        let current = self.trial_epoch();
+        self.inbox
+            .drain()
+            .into_iter()
+            .filter(|pending| pending.trial_epoch == current)
+            .map(|pending| pending.message)
+            .collect()
+    }
+
     pub fn set_main_input_enabled(&mut self, enabled: bool) {
         self.main_input_enabled = enabled;
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(content: &str, from: Option<&str>) -> ChatMessage {
+        ChatMessage {
+            content: content.to_string(),
+            from: from.map(str::to_string),
+            correlation: None,
+            source: MessageSource::System,
+            api_auto_respond: false,
+            assistant_generation: None,
+        }
+    }
+
+    #[test]
+    fn transcript_text_keeps_sender_timestamp_and_order() {
+        let mut chat = ChatExample::new();
+        chat.hydrate(
+            vec![
+                message("No, I like aesthetics", Some("LUIS3")),
+                message("Moved to condition 1 (COOP), trial 1.", Some("System")),
+                message("No sender here", None),
+            ],
+            vec![
+                "00:35:37".to_string(),
+                "00:35:43".to_string(),
+                "00:35:44".to_string(),
+            ],
+        );
+
+        let expected = concat!(
+            "00:35:37 LUIS3\n",
+            "No, I like aesthetics\n\n",
+            "00:35:43 System\n",
+            "Moved to condition 1 (COOP), trial 1.\n\n",
+            "00:35:44\n",
+            "No sender here\n",
+        );
+        assert_eq!(chat.transcript_text(), expected);
+    }
+
+    #[test]
+    fn transcript_text_ends_with_exactly_one_newline() {
+        let chat = ChatExample::new();
+        let text = chat.transcript_text();
+        assert!(text.contains("humaipsy Started"));
+        assert!(text.ends_with('\n'));
+        assert!(!text.ends_with("\n\n"));
+    }
+
+    #[test]
+    fn copy_feedback_shows_for_two_seconds() {
+        let mut chat = ChatExample::new();
+        assert!(!chat.transcript_copied_recently(10.0));
+
+        chat.mark_transcript_copied(10.0);
+        assert!(chat.transcript_copied_recently(10.5));
+        assert!(chat.transcript_copied_recently(11.9));
+        assert!(!chat.transcript_copied_recently(12.0));
+    }
+
+    fn pending(epoch: u64, content: &str) -> PendingReply {
+        PendingReply {
+            trial_epoch: epoch,
+            message: message(content, Some("NO_NAME_2")),
+        }
+    }
+
+    #[test]
+    fn trial_epoch_only_moves_forward_and_is_shared_with_the_engine() {
+        let chat = ChatExample::new();
+        assert_eq!(chat.trial_epoch(), 0);
+
+        // The engine's cancellation check must observe the bump through the same
+        // handle the request captured.
+        let handle = chat.trial_epoch_handle();
+        chat.advance_trial_epoch();
+        assert_eq!(chat.trial_epoch(), 1);
+        assert_eq!(handle.load(Ordering::SeqCst), 1);
+
+        chat.advance_trial_epoch();
+        assert_eq!(chat.trial_epoch(), 2);
+    }
+
+    #[test]
+    fn a_reply_from_a_finished_trial_never_reaches_the_chat() {
+        // The scenario: the participant sends at second 18 of a 20-second trial,
+        // the clock runs out, the trial advances, and only then does the model
+        // finish. Its answer must not appear in the new trial.
+        let chat = ChatExample::new();
+        let tx = chat.inbox.sender();
+        tx.send(pending(0, "answer for the trial that just ended"))
+            .unwrap();
+
+        // The trial ends: the epoch moves on before the reply is drained.
+        chat.advance_trial_epoch();
+
+        let kept: Vec<String> = chat
+            .drain_current_replies()
+            .into_iter()
+            .map(|message| message.content)
+            .collect();
+        assert!(
+            kept.is_empty(),
+            "a reply requested for the previous trial must be dropped, got {kept:?}"
+        );
+    }
+
+    #[test]
+    fn a_reply_requested_for_the_current_trial_is_kept() {
+        let chat = ChatExample::new();
+        let tx = chat.inbox.sender();
+        chat.advance_trial_epoch();
+        chat.advance_trial_epoch();
+        tx.send(pending(2, "answer for this trial")).unwrap();
+        tx.send(pending(1, "late answer for an older trial")).unwrap();
+
+        let kept: Vec<String> = chat
+            .drain_current_replies()
+            .into_iter()
+            .map(|message| message.content)
+            .collect();
+        assert_eq!(kept, vec!["answer for this trial"]);
+    }
 }

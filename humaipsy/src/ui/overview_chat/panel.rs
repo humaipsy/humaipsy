@@ -27,7 +27,7 @@ use humaipsy_core::sync_ext::MutexExt;
 use humaipsy_core::chat_types::{ChatMessage, MessageSource, Room};
 use humaipsy_core::store::Store;
 
-use super::chat::ChatExample;
+use super::chat::{ChatExample, PendingReply};
 
 /// Chat SQLite connections, keyed by path and opened at most once per path —
 /// mirrors `InferenceEngine::from_host`'s cache in `humaipsy_core::ollama::engine`.
@@ -64,7 +64,7 @@ fn chat_db_path(app: &HumaiPsy) -> PathBuf {
 // the *actual* configured condition/trial counts from the design passed in
 // instead of the old hardcoded 2x2 constants — this is what makes the Design
 // tab's "Conditions"/"Trials" controls actually take effect.
-use humaipsy_core::experiment::TrialDescriptor;
+use humaipsy_core::experiment::{ConditionOrder, TrialDescriptor};
 
 /// All Overview-tab experiment/chat orchestration state, owned by `HumaiPsyApp`
 /// via `HumaiPsyUiState::overview_chat` and threaded through render calls
@@ -99,6 +99,12 @@ pub(crate) struct ExperimentSessionState {
     awaiting_final_answer: bool,
     finished_popup_open: bool,
     experiment_complete: bool,
+    /// The seed this session's randomised condition order was drawn from, fixed
+    /// when the experiment started. `None` until then (and for the fixed
+    /// [`ConditionOrder`] modes, which never read it). Keeping it here rather
+    /// than recomputing it from the live Participant ID field means editing that
+    /// field mid-run cannot retroactively relabel a trial already recorded.
+    randomisation_seed: Option<u64>,
 }
 
 fn total_experiment_trials(design: &HumaiPsyExpDesign) -> usize {
@@ -109,10 +115,26 @@ fn total_experiment_trials(design: &HumaiPsyExpDesign) -> usize {
 }
 
 fn trial_descriptor(design: &HumaiPsyExpDesign, index: usize) -> TrialDescriptor {
-    humaipsy_core::experiment::trial_descriptor_with_start(
+    trial_descriptor_with_seed(design, index, design_randomisation_seed(design))
+}
+
+/// The seed a participant's randomised order is drawn from: their ID plus the
+/// design name, so one participant always draws the same order (a run is
+/// resumable and auditable) while different participants draw different ones.
+fn design_randomisation_seed(design: &HumaiPsyExpDesign) -> u64 {
+    humaipsy_core::experiment::randomisation_seed(&design.participant_id, &design.name)
+}
+
+fn trial_descriptor_with_seed(
+    design: &HumaiPsyExpDesign,
+    index: usize,
+    seed: u64,
+) -> TrialDescriptor {
+    humaipsy_core::experiment::trial_descriptor_for_order(
         index,
-        design.start_condition == StartCondition::Condition2,
         humaipsy_core::experiment::clamp_condition_count(design.conditions),
+        design.condition_order,
+        seed,
     )
 }
 
@@ -123,7 +145,14 @@ fn current_trial_descriptor_from_state(
     let capped_index = state
         .trial_index
         .min(total_experiment_trials(design).saturating_sub(1));
-    trial_descriptor(design, capped_index)
+    match state.randomisation_seed {
+        // A session in flight reads the order it was started with, so the
+        // Participant ID field can be edited without relabelling a recorded trial.
+        Some(seed) => trial_descriptor_with_seed(design, capped_index, seed),
+        // Before Play there is no frozen seed yet; preview the order this
+        // participant would draw.
+        None => trial_descriptor(design, capped_index),
+    }
 }
 
 fn experiment_status_label(design: &HumaiPsyExpDesign, state: &ExperimentSessionState) -> String {
@@ -244,6 +273,7 @@ fn design_snapshot(design: &HumaiPsyExpDesign) -> ExperimentDesignSnapshot {
         trials: design.trials,
         trial_seconds: design.trial_seconds,
         topic: design.topic.clone(),
+        randomised: design.condition_order == ConditionOrder::Random,
     }
 }
 
@@ -330,6 +360,10 @@ fn advance_to_next_trial(
     if state.session.running {
         end_trial(timed_out);
     }
+
+    // The previous trial is over: cancel anything still generating for it, so its
+    // answer can neither appear in nor be recorded against the next trial.
+    state.chat.advance_trial_epoch();
 
     let next_index = state.session.trial_index + 1;
     if next_index >= total_experiment_trials(&state.exp_design) {
@@ -850,6 +884,11 @@ fn spawn_ollama_opening_question(
     let history_size = app.conversation_history_size;
     let trace_context =
         inference_trace_context(session, "overview_chat.humai_agent.opening_question");
+    // The trial this question belongs to. If the experiment moves on before the
+    // answer arrives, the epoch no longer matches and the reply is dropped.
+    let trial_epoch = chat.trial_epoch();
+    let epoch_handle = chat.trial_epoch_handle();
+    let epoch_check = epoch_handle.clone();
 
     if let Ok(mut flag) = waiting.lock() {
         *flag = true;
@@ -860,11 +899,21 @@ fn spawn_ollama_opening_question(
             ollama_host,
         ));
         let agent = humaipsy_core::agent::HumaiPsyAgent::new(provider, model, assistant_prompt)
-            .with_history_size(history_size);
+            .with_history_size(history_size)
+            .with_stop_epoch((epoch_handle, trial_epoch));
 
         let out = agent
             .generate_opening_question(&participant_id, &topic, trace_context)
             .await;
+
+        // The trial that asked for this answer is over — do not record it, do not
+        // show it in the new trial, just stop waiting.
+        if epoch_check.load(Ordering::SeqCst) != trial_epoch {
+            if let Ok(mut flag) = waiting.lock() {
+                *flag = false;
+            }
+            return;
+        }
 
         let reply = match out {
             Ok(agent_reply) => {
@@ -897,11 +946,38 @@ fn spawn_ollama_opening_question(
             let ts = ChatExample::display_time_for_message(&reply);
             let _ = store.append_message(&room_id, &reply, &ts);
         }
-        let _ = tx.send(reply);
+        let _ = tx.send(PendingReply {
+            trial_epoch,
+            message: reply,
+        });
         if let Ok(mut flag) = waiting.lock() {
             *flag = false;
         }
     });
+}
+
+/// Puts the session back to "not started": clock reset, the open trial and run
+/// closed in the recorder, and every per-run flag cleared.
+///
+/// Shared by the timer's × button and by deleting the conversation an experiment
+/// is writing into — a deleted conversation must never leave a session that still
+/// believes it is running, with nothing to append to.
+fn stop_experiment(app: &HumaiPsy, state: &mut OverviewChatUiState) {
+    // Anything still generating belongs to the run being stopped.
+    state.chat.advance_trial_epoch();
+    humaipsy_core::timer::stop_and_reset_main_timer();
+    end_trial(false);
+    end_experiment();
+    state.session.running = false;
+    state.session.configured = false;
+    state.session.trial_index = 0;
+    state.session.trial_memory_start_idx = 0;
+    state.session.trial_timeout_popup_open = false;
+    state.session.awaiting_final_answer = false;
+    state.session.finished_popup_open = false;
+    state.session.experiment_complete = false;
+    state.session.randomisation_seed = None;
+    update_web_status(app, state);
 }
 
 fn start_experiment_from_play(app: &HumaiPsy, store: &Store, state: &mut OverviewChatUiState) {
@@ -986,6 +1062,15 @@ fn start_experiment_from_play(app: &HumaiPsy, store: &Store, state: &mut Overvie
     state.session.awaiting_final_answer = false;
     state.session.finished_popup_open = false;
     state.session.experiment_complete = false;
+    // Drawn once, here, and then kept for the whole session: the recorder and the
+    // UI both read the trial order back through this seed.
+    state.session.randomisation_seed = Some(humaipsy_core::experiment::randomisation_seed(
+        &participant_id,
+        state.exp_design.name.trim(),
+    ));
+    // A fresh run is a fresh epoch: nothing generated for a previous run may
+    // arrive in this one.
+    state.chat.advance_trial_epoch();
 
     let design_snapshot = design_snapshot(&state.exp_design);
     let trial_desc = current_trial_descriptor_from_state(&state.exp_design, &state.session);
@@ -1025,12 +1110,22 @@ fn start_experiment_from_play(app: &HumaiPsy, store: &Store, state: &mut Overvie
     );
 }
 
-/// The condition the first trial uses. The sequence alternates from there.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum StartCondition {
-    #[default]
-    Condition1,
-    Condition2,
+/// Labels for the Design tab's Randomisation Condition dropdown, in the order the
+/// options are offered. The variants themselves — and what each one means for the
+/// trial sequence — live in `humaipsy_core::experiment::ConditionOrder`; only the
+/// wording is a presentation choice, so it stays here.
+const CONDITION_ORDER_OPTIONS: [(ConditionOrder, &str); 3] = [
+    (ConditionOrder::Condition1First, "Condition 1"),
+    (ConditionOrder::Condition2First, "Condition 2"),
+    (ConditionOrder::Random, "Random"),
+];
+
+fn condition_order_label(order: ConditionOrder) -> &'static str {
+    CONDITION_ORDER_OPTIONS
+        .iter()
+        .find(|(candidate, _)| *candidate == order)
+        .map(|(_, label)| *label)
+        .unwrap_or("Condition 1")
 }
 
 #[derive(Clone, Debug)]
@@ -1044,7 +1139,7 @@ pub(crate) struct HumaiPsyExpDesign {
     pub trial_seconds: u32,
     pub topic: String,
     pub question: String,
-    pub start_condition: StartCondition,
+    pub condition_order: ConditionOrder,
 }
 
 impl Default for HumaiPsyExpDesign {
@@ -1059,7 +1154,7 @@ impl Default for HumaiPsyExpDesign {
             trial_seconds: 120,
             topic: "Ceramics and Pottery".to_string(),
             question: "Are you happy?".to_string(),
-            start_condition: StartCondition::Condition1,
+            condition_order: ConditionOrder::Condition1First,
         }
     }
 }
@@ -1168,7 +1263,7 @@ pub(crate) fn render_overview_panel(
     state.chat.room_mode_human_agent = human_to_agent_mode;
     state.chat.set_main_input_enabled(human_to_agent_mode);
 
-    for item in state.chat.inbox.drain() {
+    for item in state.chat.drain_current_replies() {
         let ts = ChatExample::display_time_for_message(&item);
         state.chat.message_timestamps.push(ts);
         state.chat.messages.push(item);
@@ -1246,9 +1341,22 @@ pub(crate) fn render_overview_panel(
                             .show(ui, |ui| {
                                 ui.set_min_height(row_height);
                                 ui.set_height(row_height);
-                                state
-                                    .chat
-                                    .sidebar_ui(ui, &store, &state.exp_design.participant_id);
+                                let deleted_room = state.chat.sidebar_ui(
+                                    ui,
+                                    &store,
+                                    &state.exp_design.participant_id,
+                                );
+                                // Deleting the conversation the experiment is appending to
+                                // stops it: otherwise the session would keep "running" with
+                                // no room to write into, and the next trial's messages would
+                                // land in whichever room happened to be selected next.
+                                if let Some(deletion) = deleted_room
+                                    && deletion.was_selected
+                                    && state.session.configured
+                                    && !state.session.experiment_complete
+                                {
+                                    stop_experiment(app, state);
+                                }
                             });
                     },
                 );
@@ -1474,18 +1582,7 @@ fn render_chat_rectangle(
                                             .on_hover_text("Stop the experiment and reset the timer to 00:00:00")
                                             .clicked()
                                         {
-                                            humaipsy_core::timer::stop_and_reset_main_timer();
-                                            end_trial(false);
-                                            end_experiment();
-                                            state.session.running = false;
-                                            state.session.configured = false;
-                                            state.session.trial_index = 0;
-                                            state.session.trial_memory_start_idx = 0;
-                                            state.session.trial_timeout_popup_open = false;
-                                            state.session.awaiting_final_answer = false;
-                                            state.session.finished_popup_open = false;
-                                            state.session.experiment_complete = false;
-                                            update_web_status(app, state);
+                                            stop_experiment(app, state);
                                         }
 
                                         let pause_btn = egui::Button::new(
@@ -1664,29 +1761,57 @@ fn render_chat_rectangle(
             ui.separator();
             ui.add_space(6.0);
 
-            ui.add_enabled_ui(
-                (human_to_agent_mode && !state.session.experiment_complete)
-                    || state.session.awaiting_final_answer,
-                |ui| {
-                ui.horizontal(|ui| {
+            ui.horizontal(|ui| {
                     ui.add_space(12.0);
-                    let input_width = (ui.available_width() - 72.0).max(220.0);
+                    let copy_width = 56.0;
+                    let input_width =
+                        (ui.available_width() - 52.0 - copy_width - 24.0).max(220.0);
                     let hint = if state.session.awaiting_final_answer {
                         "Answer the final question"
                     } else {
                         "Type a message"
                     };
-                    let response = ui.add_sized(
-                        egui::vec2(input_width, input_row_height),
-                        egui::TextEdit::singleline(&mut state.chat.input_text).hint_text(hint),
+                    // Only the input and Send are gated on a message being
+                    // sendable; Copy stays available because copying the
+                    // transcript is most useful once the experiment is over.
+                    let mut send_clicked = false;
+                    ui.add_enabled_ui(
+                        (human_to_agent_mode && !state.session.experiment_complete)
+                            || state.session.awaiting_final_answer,
+                        |ui| {
+                            let response = ui.add_sized(
+                                egui::vec2(input_width, input_row_height),
+                                egui::TextEdit::singleline(&mut state.chat.input_text)
+                                    .hint_text(hint),
+                            );
+                            send_clicked = ui
+                                .add_sized(
+                                    egui::vec2(52.0, input_row_height),
+                                    egui::Button::new("Send"),
+                                )
+                                .clicked()
+                                || (response.lost_focus()
+                                    && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                        },
                     );
-                    let send_clicked = ui
+
+                    if ui
                         .add_sized(
-                            egui::vec2(52.0, input_row_height),
-                            egui::Button::new("Send"),
+                            egui::vec2(copy_width, input_row_height),
+                            egui::Button::new("Copy"),
                         )
+                        .on_hover_text("Copy the whole chat transcript to the clipboard")
                         .clicked()
-                        || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                    {
+                        ui.ctx().copy_text(state.chat.transcript_text());
+                        state.chat.mark_transcript_copied(ui.input(|i| i.time));
+                    }
+                    let now = ui.input(|i| i.time);
+                    if state.chat.transcript_copied_recently(now) {
+                        ui.label(egui::RichText::new("Copied").small().weak());
+                        ui.ctx()
+                            .request_repaint_after(Duration::from_millis(200));
+                    }
 
                     if send_clicked && !state.chat.input_text.trim().is_empty() {
                         let message_text = state.chat.input_text.trim().to_string();
@@ -1743,14 +1868,24 @@ fn render_chat_rectangle(
                         let history_size = app.conversation_history_size;
                         let trace_context =
                             inference_trace_context(&state.session, "overview_chat.humai_agent.reply");
+                        // Tagged with the trial this answer belongs to; a reply that
+                        // arrives after the trial has ended is discarded (and the
+                        // request itself is aborted by the engine).
+                        let trial_epoch = state.chat.trial_epoch();
+                        let epoch_handle = state.chat.trial_epoch_handle();
+                        let epoch_check = epoch_handle.clone();
                         if model.is_empty() {
-                            let _ = tx.send(ChatMessage {
-                                content: "Please select a global Ollama model in Settings.".to_string(),
-                                from: Some("System".to_string()),
-                                correlation: None,
-                                source: MessageSource::System,
-                                api_auto_respond: false,
-                                assistant_generation: None,
+                            let _ = tx.send(PendingReply {
+                                trial_epoch,
+                                message: ChatMessage {
+                                    content: "Please select a global Ollama model in Settings."
+                                        .to_string(),
+                                    from: Some("System".to_string()),
+                                    correlation: None,
+                                    source: MessageSource::System,
+                                    api_auto_respond: false,
+                                    assistant_generation: None,
+                                },
                             });
                         } else {
                             if let Ok(mut flag) = waiting.lock() {
@@ -1767,10 +1902,21 @@ fn render_chat_rectangle(
                                     model,
                                     assistant_prompt,
                                 )
-                                .with_history_size(history_size);
+                                .with_history_size(history_size)
+                                .with_stop_epoch((epoch_handle, trial_epoch));
                                 let out = agent
                                     .reply_from_memory(&memory_snapshot, trace_context)
                                     .await;
+
+                                // Trial over: drop the answer instead of recording it
+                                // against the trial that is now current.
+                                if epoch_check.load(Ordering::SeqCst) != trial_epoch {
+                                    if let Ok(mut flag) = waiting.lock() {
+                                        *flag = false;
+                                    }
+                                    return;
+                                }
+
                                 let reply = match out {
                                     Ok(agent_reply) => {
                                         record_ai_transcript(
@@ -1804,7 +1950,10 @@ fn render_chat_rectangle(
                                     let ts = ChatExample::display_time_for_message(&reply);
                                     let _ = store.append_message(&room_id, &reply, &ts);
                                 }
-                                let _ = tx.send(reply);
+                                let _ = tx.send(PendingReply {
+                                    trial_epoch,
+                                    message: reply,
+                                });
                                 if let Ok(mut flag) = waiting.lock() {
                                     *flag = false;
                                 }
@@ -1813,8 +1962,7 @@ fn render_chat_rectangle(
                         }
                     }
                 });
-                ui.add_space(8.0);
-            });
+            ui.add_space(8.0);
         });
 }
 
@@ -2128,28 +2276,28 @@ fn render_right_bar(
                                                 egui::ComboBox::from_id_salt(
                                                     "randomisation_condition_selector",
                                                 )
-                                                .selected_text(match state.exp_design.start_condition {
-                                                    StartCondition::Condition1 => "Condition 1",
-                                                    StartCondition::Condition2 => "Condition 2",
-                                                })
+                                                .selected_text(
+                                                    condition_order_label(
+                                                        state.exp_design.condition_order,
+                                                    ),
+                                                )
                                                 .show_ui(ui, |ui| {
-                                                    ui.selectable_value(
-                                                        &mut state.exp_design.start_condition,
-                                                        StartCondition::Condition1,
-                                                        "Condition 1",
-                                                    );
-                                                    ui.selectable_value(
-                                                        &mut state.exp_design.start_condition,
-                                                        StartCondition::Condition2,
-                                                        "Condition 2",
-                                                    );
+                                                    for (order, label) in CONDITION_ORDER_OPTIONS {
+                                                        ui.selectable_value(
+                                                            &mut state.exp_design.condition_order,
+                                                            order,
+                                                            label,
+                                                        );
+                                                    }
                                                 });
                                             },
                                         );
                                     });
                                     ui.label(
                                         egui::RichText::new(
-                                            "The condition that speaks first; conditions alternate from there.",
+                                            "Condition 1/2 fix which condition speaks first and \
+                                             alternate from there. Random draws a per-participant \
+                                             order with one trial of each condition per block.",
                                         )
                                         .small()
                                         .weak(),
@@ -2388,17 +2536,97 @@ mod tests {
     }
 
     #[test]
-    fn selected_start_condition_changes_the_first_trial() {
+    fn selected_condition_order_changes_the_first_trial() {
         let coop_first = HumaiPsyExpDesign::default();
         assert_eq!(trial_descriptor(&coop_first, 0).condition_index, 0);
         assert_eq!(trial_descriptor(&coop_first, 1).condition_index, 1);
 
         let argum_first = HumaiPsyExpDesign {
-            start_condition: StartCondition::Condition2,
+            condition_order: ConditionOrder::Condition2First,
             ..HumaiPsyExpDesign::default()
         };
         assert_eq!(trial_descriptor(&argum_first, 0).condition_index, 1);
         assert_eq!(trial_descriptor(&argum_first, 1).condition_index, 0);
+    }
+
+    #[test]
+    fn condition_order_labels_cover_every_option() {
+        // The dropdown renders exactly this table; a new variant with no label
+        // would silently show up as "Condition 1".
+        assert_eq!(CONDITION_ORDER_OPTIONS.len(), 3);
+        for (order, label) in CONDITION_ORDER_OPTIONS {
+            assert_eq!(condition_order_label(order), label);
+        }
+        assert_eq!(
+            condition_order_label(ConditionOrder::default()),
+            "Condition 1"
+        );
+    }
+
+    #[test]
+    fn random_condition_order_permutes_each_block() {
+        let design = HumaiPsyExpDesign {
+            condition_order: ConditionOrder::Random,
+            participant_id: "P042".to_string(),
+            ..HumaiPsyExpDesign::default()
+        };
+
+        // 2 conditions x 2 trials = 4 windows; every block of two still holds one
+        // trial of each condition, so the design's trial count stays exact.
+        let sequence: Vec<usize> = (0..4)
+            .map(|index| trial_descriptor(&design, index).condition_index)
+            .collect();
+        for block in sequence.chunks(2) {
+            let mut conditions = block.to_vec();
+            conditions.sort_unstable();
+            assert_eq!(conditions, vec![0, 1]);
+        }
+        assert_eq!(trial_descriptor(&design, 3).trial_in_condition, 1);
+    }
+
+    #[test]
+    fn random_condition_order_is_drawn_from_the_participant_not_the_clock() {
+        let design = HumaiPsyExpDesign {
+            condition_order: ConditionOrder::Random,
+            participant_id: "P042".to_string(),
+            ..HumaiPsyExpDesign::default()
+        };
+        let first: Vec<usize> = (0..8)
+            .map(|index| trial_descriptor(&design, index).condition_index)
+            .collect();
+        let again: Vec<usize> = (0..8)
+            .map(|index| trial_descriptor(&design, index).condition_index)
+            .collect();
+        assert_eq!(
+            first, again,
+            "the mapping is recomputed every frame, so it must be deterministic"
+        );
+    }
+
+    #[test]
+    fn a_running_session_keeps_the_seed_it_started_with() {
+        let design = HumaiPsyExpDesign {
+            condition_order: ConditionOrder::Random,
+            participant_id: "P042".to_string(),
+            ..HumaiPsyExpDesign::default()
+        };
+        let seed = humaipsy_core::experiment::randomisation_seed("P042", "Exp001");
+        let mut edited = design.clone();
+        edited.participant_id = "P777".to_string();
+
+        for index in 0..4 {
+            let state = ExperimentSessionState {
+                trial_index: index,
+                randomisation_seed: Some(seed),
+                ..ExperimentSessionState::default()
+            };
+            // The seed drawn at Play wins over the live Participant ID field, so
+            // editing it mid-run cannot relabel an already-recorded trial.
+            assert_eq!(
+                current_trial_descriptor_from_state(&edited, &state),
+                trial_descriptor_with_seed(&design, index, seed),
+            );
+        }
     }
 
     #[test]
