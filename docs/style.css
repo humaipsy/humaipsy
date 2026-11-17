@@ -339,23 +339,13 @@ p {
   fill: none;
 }
 
-/* The one authored moment: pointing at a trial names its agent and condition
-   in the annotation line, so the strip is readable cell by cell and not only
-   by the caption. Nothing is hidden that the caption does not also say. */
-.fig__hint {
-  font-family: var(--mono);
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  fill: var(--accent);
-  text-anchor: middle;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-.fig__bar:hover .fig__hint {
-  opacity: 1;
-}
-.fig__bar:hover .fig__box {
+/* The one authored moment: the two rows are the same twelve trials offset by one,
+   so pointing at a trial lights that trial in both orders, and the step the
+   counterbalancing draws is legible without re-reading the caption. Nothing is
+   revealed that the caption does not also say. */
+.fig__col:hover .fig__box {
   stroke: var(--accent);
+  stroke-width: 2;
 }
 
 figcaption {
@@ -577,8 +567,7 @@ figcaption .fig__no {
     --accent-soft: #eee;
   }
   .skip-link,
-  .actions .btn--ghost,
-  .fig__hint {
+  .actions .btn--ghost {
     display: none;
   }
   .field,

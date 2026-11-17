@@ -79,13 +79,23 @@ Body is 16.5px/1.6; prose measures are capped around 56–62ch.
 ## The figure
 
 `Fig. 1` is the page's whole argument: a 2 × 2 design matrix (`AGENT A` / `AGENT B` as
-rows, `COND X` / `COND Y` as columns) beside one participant's twelve-trial sequence,
-with the running trial bracketed as `04 / 12`.
+rows, `COND X` / `COND Y` as columns) beside the two counterbalanced trial orders — the
+upper strip starting on `COND X`, the lower on `COND Y`. Both alternate condition trial
+by trial, so stacked they step one trial at a time: the staircase a counterbalanced
+within-subject design draws. The running trial is bracketed as `04 / 12` on the upper
+order.
 
-- Encodings: **solid fill = COND X**, **hatch = COND Y**, **position = trial order**.
-  One channel per meaning; do not add a second colour to distinguish conditions.
+- Encodings: **solid fill = COND X**, **hatch = COND Y**, **position = trial order**,
+  **upper or lower strip = which condition runs first**. One channel per meaning; do not
+  add a second colour to distinguish conditions.
 - Conditions are distinguished by pattern, not hue, so the figure survives greyscale
   printing and colour-vision deficiency.
+- The strips carry no row labels, deliberately. Set beside the matrix or between the two
+  strips they crowded the plate and read as if they belonged to it; the caption names
+  the two orders instead. Do not add them back.
+- The hover is the one authored moment: pointing at a trial lights that trial in both
+  orders, which is where the one-trial offset is legible. It adds nothing the plate does
+  not already encode, so the caption can stay to one sentence.
 - It exists as **two inline SVG plates** — `--wide` and `--compact` — swapped at
   `760px`. An SVG scales its own labels, so a single plate rendered at 0.45× would
   have produced 5px figure text on a phone. **Edit both plates**; a change to one that

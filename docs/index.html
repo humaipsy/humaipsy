@@ -44,8 +44,8 @@
     <div class="field__body">
       <figure class="fig">
         <svg class="fig__plate fig__plate--wide" viewBox="0 0 760 224" role="img" aria-labelledby="fig-title fig-desc">
-          <title id="fig-title">The 2 × 2 design, and one participant’s twelve-trial sequence</title>
-          <desc id="fig-desc">Left: a two-by-two table of agent by condition, with AGENT A and AGENT B as rows and COND X and COND Y as columns; COND X cells are filled solid and COND Y cells are hatched. Right: twelve trials in order, each filled by its condition, with trial 04 marked as the trial in progress.</desc>
+          <title id="fig-title">The 2 × 2 design, and the two counterbalanced trial orders</title>
+          <desc id="fig-desc">Left: a two-by-two table of agent by condition, with AGENT A and AGENT B as rows and COND X and COND Y as columns; COND X cells are filled solid and COND Y cells are hatched. Right: two rows of twelve trials, the upper starting on COND X and the lower on COND Y, each row alternating condition trial by trial so the two rows are offset by one; trial 04 of the first row is marked as the trial in progress.</desc>
 
           <defs>
             <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -64,55 +64,58 @@
           <rect class="fig__box fig__box--y" x="88" y="102" width="96" height="52"/>
           <rect class="fig__box fig__box--x" x="190" y="102" width="96" height="52"/>
 
-          <!-- one participant's twelve trials, in the order they are run -->
+          <!-- The same twelve trials under the two counterbalanced orders. Both
+               alternate condition, so stacked the pair steps one trial at a time —
+               the staircase. The upper row starts on COND X, the lower on COND Y;
+               the caption names them, so the plate itself carries no row labels. -->
           <g class="fig__seq">
-            <g class="fig__bar">
-              <rect class="fig__box fig__box--x" x="308" y="44" width="34" height="128"/>
-              <text class="fig__hint" x="325" y="216">A · X</text>
+            <g class="fig__col">
+              <rect class="fig__box fig__box--x" x="308" y="44" width="34" height="58"/>
+              <rect class="fig__box fig__box--y" x="308" y="112" width="34" height="58"/>
             </g>
-            <g class="fig__bar">
-              <rect class="fig__box fig__box--y" x="346" y="44" width="34" height="128"/>
-              <text class="fig__hint" x="363" y="216">B · Y</text>
+            <g class="fig__col">
+              <rect class="fig__box fig__box--y" x="346" y="44" width="34" height="58"/>
+              <rect class="fig__box fig__box--x" x="346" y="112" width="34" height="58"/>
             </g>
-            <g class="fig__bar">
-              <rect class="fig__box fig__box--y" x="384" y="44" width="34" height="128"/>
-              <text class="fig__hint" x="401" y="216">A · Y</text>
+            <g class="fig__col">
+              <rect class="fig__box fig__box--x" x="384" y="44" width="34" height="58"/>
+              <rect class="fig__box fig__box--y" x="384" y="112" width="34" height="58"/>
             </g>
-            <g class="fig__bar">
-              <rect class="fig__box fig__box--x" x="422" y="44" width="34" height="128"/>
-              <text class="fig__hint" x="439" y="216">B · X</text>
+            <g class="fig__col">
+              <rect class="fig__box fig__box--y" x="422" y="44" width="34" height="58"/>
+              <rect class="fig__box fig__box--x" x="422" y="112" width="34" height="58"/>
             </g>
-            <g class="fig__bar">
-              <rect class="fig__box fig__box--x" x="460" y="44" width="34" height="128"/>
-              <text class="fig__hint" x="477" y="216">A · X</text>
+            <g class="fig__col">
+              <rect class="fig__box fig__box--x" x="460" y="44" width="34" height="58"/>
+              <rect class="fig__box fig__box--y" x="460" y="112" width="34" height="58"/>
             </g>
-            <g class="fig__bar">
-              <rect class="fig__box fig__box--y" x="498" y="44" width="34" height="128"/>
-              <text class="fig__hint" x="515" y="216">A · Y</text>
+            <g class="fig__col">
+              <rect class="fig__box fig__box--y" x="498" y="44" width="34" height="58"/>
+              <rect class="fig__box fig__box--x" x="498" y="112" width="34" height="58"/>
             </g>
-            <g class="fig__bar">
-              <rect class="fig__box fig__box--x" x="536" y="44" width="34" height="128"/>
-              <text class="fig__hint" x="553" y="216">B · X</text>
+            <g class="fig__col">
+              <rect class="fig__box fig__box--x" x="536" y="44" width="34" height="58"/>
+              <rect class="fig__box fig__box--y" x="536" y="112" width="34" height="58"/>
             </g>
-            <g class="fig__bar">
-              <rect class="fig__box fig__box--y" x="574" y="44" width="34" height="128"/>
-              <text class="fig__hint" x="591" y="216">B · Y</text>
+            <g class="fig__col">
+              <rect class="fig__box fig__box--y" x="574" y="44" width="34" height="58"/>
+              <rect class="fig__box fig__box--x" x="574" y="112" width="34" height="58"/>
             </g>
-            <g class="fig__bar">
-              <rect class="fig__box fig__box--x" x="612" y="44" width="34" height="128"/>
-              <text class="fig__hint" x="629" y="216">A · X</text>
+            <g class="fig__col">
+              <rect class="fig__box fig__box--x" x="612" y="44" width="34" height="58"/>
+              <rect class="fig__box fig__box--y" x="612" y="112" width="34" height="58"/>
             </g>
-            <g class="fig__bar">
-              <rect class="fig__box fig__box--x" x="650" y="44" width="34" height="128"/>
-              <text class="fig__hint" x="667" y="216">B · X</text>
+            <g class="fig__col">
+              <rect class="fig__box fig__box--y" x="650" y="44" width="34" height="58"/>
+              <rect class="fig__box fig__box--x" x="650" y="112" width="34" height="58"/>
             </g>
-            <g class="fig__bar">
-              <rect class="fig__box fig__box--y" x="688" y="44" width="34" height="128"/>
-              <text class="fig__hint" x="705" y="216">A · Y</text>
+            <g class="fig__col">
+              <rect class="fig__box fig__box--x" x="688" y="44" width="34" height="58"/>
+              <rect class="fig__box fig__box--y" x="688" y="112" width="34" height="58"/>
             </g>
-            <g class="fig__bar">
-              <rect class="fig__box fig__box--y" x="726" y="44" width="34" height="128"/>
-              <text class="fig__hint" x="743" y="216">B · Y</text>
+            <g class="fig__col">
+              <rect class="fig__box fig__box--y" x="726" y="44" width="34" height="58"/>
+              <rect class="fig__box fig__box--x" x="726" y="112" width="34" height="58"/>
             </g>
 
             <line class="fig__rule" x1="308" y1="172.5" x2="760" y2="172.5"/>
@@ -137,9 +140,9 @@
           </g>
         </svg>
 
-        <svg class="fig__plate fig__plate--compact" viewBox="0 0 360 252" role="img" aria-labelledby="fig-title-c fig-desc-c">
-          <title id="fig-title-c">The 2 × 2 design, and one participant’s twelve-trial sequence</title>
-          <desc id="fig-desc-c">Top: a two-by-two table of agent by condition, with AGENT A and AGENT B as rows and COND X and COND Y as columns; COND X cells are filled solid and COND Y cells are hatched. Bottom: twelve trials in order, each filled by its condition, with trial 04 marked as the trial in progress.</desc>
+        <svg class="fig__plate fig__plate--compact" viewBox="0 0 360 280" role="img" aria-labelledby="fig-title-c fig-desc-c">
+          <title id="fig-title-c">The 2 × 2 design, and the two counterbalanced trial orders</title>
+          <desc id="fig-desc-c">Top: a two-by-two table of agent by condition, with AGENT A and AGENT B as rows and COND X and COND Y as columns; COND X cells are filled solid and COND Y cells are hatched. Bottom: two rows of twelve trials, the upper starting on COND X and the lower on COND Y, each row alternating condition trial by trial so the two rows are offset by one; trial 04 of the first row is marked as the trial in progress.</desc>
 
           <defs>
             <pattern id="hatch-c" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -160,43 +163,79 @@
           <line class="fig__rule" x1="20" y1="102" x2="341" y2="102"/>
 
           <g class="fig__active">
-            <path class="fig__bracket" d="M101 140 V130 H125 V140"/>
-            <text class="fig__mark" x="113" y="122">04 / 12</text>
+            <path class="fig__bracket" d="M101 138 V128 H125 V138"/>
+            <text class="fig__mark" x="113" y="120">04 / 12</text>
           </g>
 
-          <g class="fig__bar"><rect class="fig__box fig__box--x" x="20" y="140" width="24" height="72"/></g>
-          <g class="fig__bar"><rect class="fig__box fig__box--yc" x="47" y="140" width="24" height="72"/></g>
-          <g class="fig__bar"><rect class="fig__box fig__box--yc" x="74" y="140" width="24" height="72"/></g>
-          <g class="fig__bar"><rect class="fig__box fig__box--x" x="101" y="140" width="24" height="72"/></g>
-          <g class="fig__bar"><rect class="fig__box fig__box--x" x="128" y="140" width="24" height="72"/></g>
-          <g class="fig__bar"><rect class="fig__box fig__box--yc" x="155" y="140" width="24" height="72"/></g>
-          <g class="fig__bar"><rect class="fig__box fig__box--x" x="182" y="140" width="24" height="72"/></g>
-          <g class="fig__bar"><rect class="fig__box fig__box--yc" x="209" y="140" width="24" height="72"/></g>
-          <g class="fig__bar"><rect class="fig__box fig__box--x" x="236" y="140" width="24" height="72"/></g>
-          <g class="fig__bar"><rect class="fig__box fig__box--x" x="263" y="140" width="24" height="72"/></g>
-          <g class="fig__bar"><rect class="fig__box fig__box--yc" x="290" y="140" width="24" height="72"/></g>
-          <g class="fig__bar"><rect class="fig__box fig__box--yc" x="317" y="140" width="24" height="72"/></g>
+          <g class="fig__col">
+            <rect class="fig__box fig__box--x" x="20" y="138" width="24" height="48"/>
+            <rect class="fig__box fig__box--yc" x="20" y="196" width="24" height="48"/>
+          </g>
+          <g class="fig__col">
+            <rect class="fig__box fig__box--yc" x="47" y="138" width="24" height="48"/>
+            <rect class="fig__box fig__box--x" x="47" y="196" width="24" height="48"/>
+          </g>
+          <g class="fig__col">
+            <rect class="fig__box fig__box--x" x="74" y="138" width="24" height="48"/>
+            <rect class="fig__box fig__box--yc" x="74" y="196" width="24" height="48"/>
+          </g>
+          <g class="fig__col">
+            <rect class="fig__box fig__box--yc" x="101" y="138" width="24" height="48"/>
+            <rect class="fig__box fig__box--x" x="101" y="196" width="24" height="48"/>
+          </g>
+          <g class="fig__col">
+            <rect class="fig__box fig__box--x" x="128" y="138" width="24" height="48"/>
+            <rect class="fig__box fig__box--yc" x="128" y="196" width="24" height="48"/>
+          </g>
+          <g class="fig__col">
+            <rect class="fig__box fig__box--yc" x="155" y="138" width="24" height="48"/>
+            <rect class="fig__box fig__box--x" x="155" y="196" width="24" height="48"/>
+          </g>
+          <g class="fig__col">
+            <rect class="fig__box fig__box--x" x="182" y="138" width="24" height="48"/>
+            <rect class="fig__box fig__box--yc" x="182" y="196" width="24" height="48"/>
+          </g>
+          <g class="fig__col">
+            <rect class="fig__box fig__box--yc" x="209" y="138" width="24" height="48"/>
+            <rect class="fig__box fig__box--x" x="209" y="196" width="24" height="48"/>
+          </g>
+          <g class="fig__col">
+            <rect class="fig__box fig__box--x" x="236" y="138" width="24" height="48"/>
+            <rect class="fig__box fig__box--yc" x="236" y="196" width="24" height="48"/>
+          </g>
+          <g class="fig__col">
+            <rect class="fig__box fig__box--yc" x="263" y="138" width="24" height="48"/>
+            <rect class="fig__box fig__box--x" x="263" y="196" width="24" height="48"/>
+          </g>
+          <g class="fig__col">
+            <rect class="fig__box fig__box--x" x="290" y="138" width="24" height="48"/>
+            <rect class="fig__box fig__box--yc" x="290" y="196" width="24" height="48"/>
+          </g>
+          <g class="fig__col">
+            <rect class="fig__box fig__box--yc" x="317" y="138" width="24" height="48"/>
+            <rect class="fig__box fig__box--x" x="317" y="196" width="24" height="48"/>
+          </g>
 
-          <line class="fig__rule" x1="20" y1="212.5" x2="341" y2="212.5"/>
+          <line class="fig__rule" x1="20" y1="254" x2="341" y2="254"/>
 
-          <text class="fig__tick" x="32" y="230">01</text>
-          <text class="fig__tick" x="59" y="230">02</text>
-          <text class="fig__tick" x="86" y="230">03</text>
-          <text class="fig__tick" x="113" y="230">04</text>
-          <text class="fig__tick" x="140" y="230">05</text>
-          <text class="fig__tick" x="167" y="230">06</text>
-          <text class="fig__tick" x="194" y="230">07</text>
-          <text class="fig__tick" x="221" y="230">08</text>
-          <text class="fig__tick" x="248" y="230">09</text>
-          <text class="fig__tick" x="275" y="230">10</text>
-          <text class="fig__tick" x="302" y="230">11</text>
-          <text class="fig__tick" x="329" y="230">12</text>
+          <text class="fig__tick" x="32" y="272">01</text>
+          <text class="fig__tick" x="59" y="272">02</text>
+          <text class="fig__tick" x="86" y="272">03</text>
+          <text class="fig__tick" x="113" y="272">04</text>
+          <text class="fig__tick" x="140" y="272">05</text>
+          <text class="fig__tick" x="167" y="272">06</text>
+          <text class="fig__tick" x="194" y="272">07</text>
+          <text class="fig__tick" x="221" y="272">08</text>
+          <text class="fig__tick" x="248" y="272">09</text>
+          <text class="fig__tick" x="275" y="272">10</text>
+          <text class="fig__tick" x="302" y="272">11</text>
+          <text class="fig__tick" x="329" y="272">12</text>
         </svg>
         <figcaption>
           <span class="fig__no">Fig. 1</span>
-          One participant’s run, shown at twelve trials. Each agent–condition pair
-          appears equally often, in a randomised order. Solid cells are
-          <strong>COND X</strong>, hatched cells are <strong>COND Y</strong>.
+          The 2 × 2 design, and the two counterbalanced orders its twelve trials are
+          run in: <strong>COND X</strong> first in the upper row, <strong>COND Y</strong>
+          first in the lower.
         </figcaption>
       </figure>
     </div>
