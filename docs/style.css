@@ -310,13 +310,12 @@ p {
   font-family: var(--mono);
   font-size: 12px;
   letter-spacing: 0.04em;
-  fill: var(--accent);
+  fill: var(--ink);
   text-anchor: middle;
 }
 .fig__box {
   stroke: var(--ink);
   stroke-width: 1;
-  transition: stroke 0.15s ease;
 }
 .fig__box--x {
   fill: var(--ink);
@@ -334,28 +333,9 @@ p {
 }
 
 .fig__bracket {
-  stroke: var(--accent);
+  stroke: var(--ink);
   stroke-width: 1;
   fill: none;
-}
-
-/* The one authored moment: pointing at a trial names its agent and condition
-   in the annotation line, so the strip is readable cell by cell and not only
-   by the caption. Nothing is hidden that the caption does not also say. */
-.fig__hint {
-  font-family: var(--mono);
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  fill: var(--accent);
-  text-anchor: middle;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-.fig__bar:hover .fig__hint {
-  opacity: 1;
-}
-.fig__bar:hover .fig__box {
-  stroke: var(--accent);
 }
 
 figcaption {
@@ -577,8 +557,7 @@ figcaption .fig__no {
     --accent-soft: #eee;
   }
   .skip-link,
-  .actions .btn--ghost,
-  .fig__hint {
+  .actions .btn--ghost {
     display: none;
   }
   .field,

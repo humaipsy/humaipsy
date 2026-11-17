@@ -8,6 +8,11 @@
 
 *.png binary
 *.ico binary
+# Raw RGBA icon buffers (assets/logo): 16,384 bytes with no header, so their colour
+# depends on every byte. `text=auto` would decide them per file, and a buffer that
+# happened to hold no NUL byte would be rewritten as text on checkout, silently
+# shifting every pixel of the icon.
+*.rgba binary
 # Self-hosted webfonts (docs/fonts). `text=auto` above would otherwise have Git
 # decide per file; a compressed font rewritten as text would be a corrupt font.
 *.woff2 binary
