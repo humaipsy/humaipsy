@@ -61,29 +61,12 @@ For how the app is put together (process model, module layout, storage formats, 
 <br>
 
 ```sh
-# Rust Application Development
-./scripts/run_app.sh
+cd humaipsy
 
-# Manually
-cd ./humaipsy
-
-# Fast compile check (all bins and tests)
-cargo check --all-targets
-
-# Run app (UI only)
-cargo run
-
-# Run the helper binary to create/update vault/.master_hash (run from humaipsy/)
-cargo run --bin gen_master_hash
-
-# Build release binary
-cargo build --release
-
-# Run tests (add --workspace from the repo root to also cover the humaipsy-core crate)
-cargo test
-
-# Lint — CI-equivalent gate, must pass clean
-cargo clippy --all-targets -- -D warnings
+cargo run --release                                     # run the app
+cargo build --release                                   # binary → target/release/humaipsy
+cargo test --workspace                                  # tests, all three crates
+cargo clippy --workspace --all-targets -- -D warnings   # the CI gate
 ```
 
 </details>
@@ -94,29 +77,12 @@ cargo clippy --all-targets -- -D warnings
 <br>
 
 ```sh
-# Rust Application Development
-scripts\run_app.bat
+cd humaipsy
 
-# Manually
-cd ./humaipsy
-
-# Fast compile check (all bins and tests)
-cargo check --all-targets
-
-# Run app (UI only)
-cargo run
-
-# Run the helper binary to create/update vault/.master_hash (run from humaipsy/)
-cargo run --bin gen_master_hash
-
-# Build release binary
-cargo build --release
-
-# Run tests (add --workspace from the repo root to also cover the humaipsy-core crate)
-cargo test
-
-# Lint — CI-equivalent gate, must pass clean
-cargo clippy --all-targets -- -D warnings
+cargo run --release                                     # run the app
+cargo build --release                                   # binary → target\release\humaipsy.exe
+cargo test --workspace                                  # tests, all three crates
+cargo clippy --workspace --all-targets -- -D warnings   # the CI gate
 ```
 
 </details>
@@ -127,29 +93,12 @@ cargo clippy --all-targets -- -D warnings
 <br>
 
 ```sh
-# Rust Application Development
-./scripts/run_app.sh
+cd humaipsy
 
-# Manually
-cd ./humaipsy
-
-# Fast compile check (all bins and tests)
-cargo check --all-targets
-
-# Run app (UI only)
-cargo run
-
-# Run the helper binary to create/update vault/.master_hash (run from humaipsy/)
-cargo run --bin gen_master_hash
-
-# Build release binary
-cargo build --release
-
-# Run tests (add --workspace from the repo root to also cover the humaipsy-core crate)
-cargo test
-
-# Lint — CI-equivalent gate, must pass clean
-cargo clippy --all-targets -- -D warnings
+cargo run --release                                     # run the app
+cargo build --release                                   # binary → target/release/humaipsy
+cargo test --workspace                                  # tests, all three crates
+cargo clippy --workspace --all-targets -- -D warnings   # the CI gate
 ```
 
 </details>
