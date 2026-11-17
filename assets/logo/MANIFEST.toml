@@ -52,8 +52,8 @@ format = "png"
 size = "1600x1000"
 background = "ink"
 purpose = "Design reference sheet: the three variants, the tile at six sizes, the palette, contrast and construction."
-bytes = 128484
-sha256 = "2e70744644f8e7e25a3c83aa50eb20ce0f4e56b80083c78dc9deeb1a97b26a18"
+bytes = 111036
+sha256 = "ca0f69a213c9bee3fe1262ef53d5e20d23087d4c74e0f740722842b5af31ffa9"
 
 [[file]]
 path = "humaipsy.svg"
