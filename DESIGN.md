@@ -39,12 +39,13 @@ follow.
 | `--ink-3` | `#666f74` | field labels, ticks, footer |
 | `--rule` | `#dfe3e4` | hairlines between fields and rows |
 | `--rule-2` | `#c2c9cb` | the stronger rule under the title block |
-| `--accent` | `#1c4b63` | the running-trial marker and interface links only |
+| `--accent` | `#1c4b63` | interface links and focus only |
 | `--accent-soft` | `#edf2f4` | text selection |
 
-The accent is the only non-grey on the page and it carries state, not decoration. If a
-new element reaches for a colour that is not in this table, it is reaching for the
-wrong thing — emphasis here comes from weight, size and rules.
+The accent is the only non-grey on the page, and it belongs to the interface — links and
+focus — never to the figure: the drawing is ink and hairline only, so it prints as one
+ink. If a new element reaches for a colour that is not in this table, it is reaching for
+the wrong thing — emphasis here comes from weight, size and rules.
 
 ## Type
 
@@ -93,9 +94,11 @@ order.
 - The strips carry no row labels, deliberately. Set beside the matrix or between the two
   strips they crowded the plate and read as if they belonged to it; the caption names
   the two orders instead. Do not add them back.
-- The hover is the one authored moment: pointing at a trial lights that trial in both
-  orders, which is where the one-trial offset is legible. It adds nothing the plate does
-  not already encode, so the caption can stay to one sentence.
+- **Nothing in the figure responds to the pointer.** The bars carry no hover, no
+  transition and no accent: the drawing states the counterbalancing on its own, and a
+  printed figure cannot hover. Do not add an interaction back as a way to explain it.
+- The annotation is ink like everything else in the plate: `04 / 12` and its bracket are
+  `--ink` at 12px, so the whole figure prints as one colour.
 - It exists as **two inline SVG plates** — `--wide` and `--compact` — swapped at
   `760px`. An SVG scales its own labels, so a single plate rendered at 0.45× would
   have produced 5px figure text on a phone. **Edit both plates**; a change to one that

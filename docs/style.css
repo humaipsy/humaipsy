@@ -310,13 +310,12 @@ p {
   font-family: var(--mono);
   font-size: 12px;
   letter-spacing: 0.04em;
-  fill: var(--accent);
+  fill: var(--ink);
   text-anchor: middle;
 }
 .fig__box {
   stroke: var(--ink);
   stroke-width: 1;
-  transition: stroke 0.15s ease;
 }
 .fig__box--x {
   fill: var(--ink);
@@ -334,18 +333,9 @@ p {
 }
 
 .fig__bracket {
-  stroke: var(--accent);
+  stroke: var(--ink);
   stroke-width: 1;
   fill: none;
-}
-
-/* The one authored moment: the two rows are the same twelve trials offset by one,
-   so pointing at a trial lights that trial in both orders, and the step the
-   counterbalancing draws is legible without re-reading the caption. Nothing is
-   revealed that the caption does not also say. */
-.fig__col:hover .fig__box {
-  stroke: var(--accent);
-  stroke-width: 2;
 }
 
 figcaption {
