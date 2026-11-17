@@ -101,6 +101,23 @@ order.
   have produced 5px figure text on a phone. **Edit both plates**; a change to one that
   is not mirrored in the other is a bug you will only see on a phone.
 
+## The mark (not this surface)
+
+The product mark is drawn and documented in [`assets/logo/`](assets/logo/) — `BRAND.md` is
+its design record, `humaipsy.svg` its source. One participant in peach, two agents in one
+blue at two values, on a 32-unit grid; the application tile is Catppuccin Macchiato, the
+same tokens `humaipsy/src/ui/theme.rs` paints the interface with.
+
+It is deliberately *not* this page's visual system, and the page does not use it:
+
+- the masthead's `HumaiPsy` is **set in Public Sans, not drawn**. A lockup would have to be
+  drawn deliberately; the tile dropped beside that wordmark would be a second identity, not
+  the mark.
+- the page's ink and `--accent` stay the page's. Peach and sapphire appear nowhere on this
+  site, and a new element reaching for them is reaching for the wrong system.
+- if the mark is ever added here, it goes in at 32 px or larger, and the field grid's
+  hairlines are not redrawn around it.
+
 ## Refusals
 
 - No shadows, no gradients, no glow, no rounded cards. Depth is rules and whitespace.

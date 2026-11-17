@@ -1,0 +1,377 @@
+# HumaiPsy mark manifest
+#
+# Generated from the files in this directory. Every digest is the file's own.
+# Regenerate this file whenever a mark or a rendered size changes.
+
+[mark]
+name = "humaipsy"
+version = "1.0"
+date = "2026-11-17"
+grid = 32
+rows = 3
+viewbox = "0 0 32 32"
+bbox = "x 4-28, y 5.25-26"
+geometry = "rows (bubbles 5 tall, rx 2.5) at y 6-11, 13.5-18.5, 21-26; human bubble x 11-28; agent bubbles x 4-22; head circle (6.9,6.9) r 1.65 sharing centre line x 6.9 with shoulders half-ellipse x 4-9.8 bottom y 11.8 ry 2.75; agent face 4.2 square rx 1.2 at x 23.8-28, centred on its row; antenna stem 0.7 x 1.1 at x 25.55, knob r 0.5; detail bars 1.2 tall rx 0.6"
+
+[palette]
+peach = "#F5A97F"
+sapphire = "#7DC4E4"
+sapphire_deep = "#5E9FC7"
+parchment = "#F4F1EA"
+ink = "#24273A"
+tile_top = "#363A4F"
+tile_bottom = "#24273A"
+
+[contrast]
+peach_on_tile = "7.62:1"
+sapphire_on_tile = "7.63:1"
+sapphire_deep_on_tile = "5.09:1"
+ink_on_sapphire = "7.63:1"
+ink_on_sapphire_deep = "5.09:1"
+white_on_ink = "14.72:1"
+parchment_on_peach = "1.71:1 (non-text)"
+parchment_on_sapphire_deep = "2.56:1 (non-text)"
+
+[application_icon]
+grid = 32
+tile_radius = 8.5
+tile_radius_px = 272
+tile_gradient = "#363A4F -> #24273A, vertical"
+rgba_px = 64
+rgba = "R,G,B,A per pixel, row-major from the top left, unmultiplied"
+
+[conditions]
+rule = "two agents, one blue at two values"
+cooperative = "sapphire"
+argumentative = "sapphire deep"
+
+[[file]]
+path = "contact-sheet.png"
+variant = "sheet"
+format = "png"
+size = "1600x1000"
+background = "ink"
+purpose = "Design reference sheet: the three variants, the tile at six sizes, the palette, contrast and construction."
+bytes = 128484
+sha256 = "2e70744644f8e7e25a3c83aa50eb20ce0f4e56b80083c78dc9deeb1a97b26a18"
+
+[[file]]
+path = "humaipsy.svg"
+variant = "light"
+format = "svg"
+size = "any"
+background = "transparent"
+purpose = "Primary vector; full colour on transparency, for light or dark grounds."
+bytes = 2109
+sha256 = "558aca378f172a9cbc5f793f47d5b0631f079edb1bbedbd8a795b3f31373d098"
+
+[[file]]
+path = "humaipsy-16.png"
+variant = "light"
+format = "png"
+size = "16"
+background = "transparent"
+purpose = "Raster; full colour on transparency, for light or dark grounds."
+bytes = 481
+sha256 = "5322d21758103d3a4c625ed42e8de5f2bbae3c59a9d6c8ef65cb0e8627d8727d"
+
+[[file]]
+path = "humaipsy-24.png"
+variant = "light"
+format = "png"
+size = "24"
+background = "transparent"
+purpose = "Raster; full colour on transparency, for light or dark grounds."
+bytes = 738
+sha256 = "c93f1060d29623e08d2fbe9a0d4d34acd65f0a403bf87557c64b9eba29eea02c"
+
+[[file]]
+path = "humaipsy-32.png"
+variant = "light"
+format = "png"
+size = "32"
+background = "transparent"
+purpose = "Raster; full colour on transparency, for light or dark grounds."
+bytes = 875
+sha256 = "832cb275a4bd975c29abb453512461d5ebeb4b9b52ab072dcbaf7d3f42f9c661"
+
+[[file]]
+path = "humaipsy-48.png"
+variant = "light"
+format = "png"
+size = "48"
+background = "transparent"
+purpose = "Raster; full colour on transparency, for light or dark grounds."
+bytes = 1454
+sha256 = "a8ad77bb65e7cbd61602a2d17f0666dbcb57381cead3fe6950c32480d3aedf8f"
+
+[[file]]
+path = "humaipsy-64.png"
+variant = "light"
+format = "png"
+size = "64"
+background = "transparent"
+purpose = "Raster; full colour on transparency, for light or dark grounds."
+bytes = 1802
+sha256 = "d48f867ca9dd56ff1147fc71742126d410f1c7b464e35d8e7234f33dceb29390"
+
+[[file]]
+path = "humaipsy-128.png"
+variant = "light"
+format = "png"
+size = "128"
+background = "transparent"
+purpose = "Raster; full colour on transparency, for light or dark grounds."
+bytes = 3400
+sha256 = "85e07511e2d72573b905ae96c3c1c9c16e357d41c8c5d5e544cabd9575a67418"
+
+[[file]]
+path = "humaipsy-256.png"
+variant = "light"
+format = "png"
+size = "256"
+background = "transparent"
+purpose = "Raster; full colour on transparency, for light or dark grounds."
+bytes = 6718
+sha256 = "c43fb74725efb0c3df136b140e656f78251b56e954ae30fb07b27504c9a2d954"
+
+[[file]]
+path = "humaipsy-512.png"
+variant = "light"
+format = "png"
+size = "512"
+background = "transparent"
+purpose = "Raster; full colour on transparency, for light or dark grounds."
+bytes = 14321
+sha256 = "88377a53f2bd17922edc902f1e109d939127e0d158ea9cd8e0de11a573795d01"
+
+[[file]]
+path = "humaipsy-1024.png"
+variant = "light"
+format = "png"
+size = "1024"
+background = "transparent"
+purpose = "Raster; full colour on transparency, for light or dark grounds."
+bytes = 30469
+sha256 = "cf8d1adb0252d909a2b6c66afa618bbfb4201e962bf64fa48bf67c3051373d61"
+
+[[file]]
+path = "humaipsy-app.svg"
+variant = "app"
+format = "svg"
+size = "any"
+background = "tile"
+purpose = "Application icon source; Macchiato gradient tile, full-colour mark, transparent corners."
+bytes = 1887
+sha256 = "288d171cb63fc6458c4378319d881b3935e924dc0831009f90eb2ee980c053b8"
+
+[[file]]
+path = "humaipsy-app-16.png"
+variant = "app"
+format = "png"
+size = "16"
+background = "ink tile"
+purpose = "Raster application icon; Macchiato tile, full-colour mark."
+bytes = 696
+sha256 = "8ccad625fb5c8ddde5dc23f3a77a7eb1e317912440db9fbb7dcfedd65053a412"
+
+[[file]]
+path = "humaipsy-app-24.png"
+variant = "app"
+format = "png"
+size = "24"
+background = "ink tile"
+purpose = "Raster application icon; Macchiato tile, full-colour mark."
+bytes = 1080
+sha256 = "6e6500598eae6947988b2fd43ea4fec8e84a7d4b270cf3e13de7cbba0fa22436"
+
+[[file]]
+path = "humaipsy-app-32.png"
+variant = "app"
+format = "png"
+size = "32"
+background = "ink tile"
+purpose = "Raster application icon; Macchiato tile, full-colour mark."
+bytes = 1438
+sha256 = "db68270ac8c1c081a3d145ef610b9de39659e3892a74223e0210bfbd471c2509"
+
+[[file]]
+path = "humaipsy-app-48.png"
+variant = "app"
+format = "png"
+size = "48"
+background = "ink tile"
+purpose = "Raster application icon; Macchiato tile, full-colour mark."
+bytes = 2226
+sha256 = "d4c9364b69deef9d30c7039a2569412cf243959268a34006c17d2285aa815be3"
+
+[[file]]
+path = "humaipsy-app-64.png"
+variant = "app"
+format = "png"
+size = "64"
+background = "ink tile"
+purpose = "Raster application icon; Macchiato tile, full-colour mark."
+bytes = 2932
+sha256 = "49cd6cd3bb10f90acc3ed34bb74aa18d0e8afa119aea9b2c0a15974e125add5b"
+
+[[file]]
+path = "humaipsy-app-128.png"
+variant = "app"
+format = "png"
+size = "128"
+background = "ink tile"
+purpose = "Raster application icon; Macchiato tile, full-colour mark."
+bytes = 6012
+sha256 = "620d562eaf3ceb572ef5e8e8d78d4a0284f670243d3ed347f78c3d10e4a6c92d"
+
+[[file]]
+path = "humaipsy-app-256.png"
+variant = "app"
+format = "png"
+size = "256"
+background = "ink tile"
+purpose = "Raster application icon; Macchiato tile, full-colour mark."
+bytes = 11938
+sha256 = "0c156c7b90864f7ceee479b53691c67f3751967e756a5a54e22db84e4899a033"
+
+[[file]]
+path = "humaipsy-app-512.png"
+variant = "app"
+format = "png"
+size = "512"
+background = "ink tile"
+purpose = "Raster application icon; Macchiato tile, full-colour mark."
+bytes = 26407
+sha256 = "3270198ffa97609f83cbbd13c71298696283138c00633a155d81b82773428eb2"
+
+[[file]]
+path = "humaipsy-app-1024.png"
+variant = "app"
+format = "png"
+size = "1024"
+background = "ink tile"
+purpose = "Raster application icon; Macchiato tile, full-colour mark."
+bytes = 60820
+sha256 = "1e979194781e0f0a240c7094f5f870e5de308237ce6db7e010339b23abf6ce46"
+
+[[file]]
+path = "humaipsy-app.rgba"
+variant = "app"
+format = "rgba"
+size = "64x64"
+background = "ink tile"
+purpose = "Unmultiplied RGBA for egui::IconData (16,384 bytes)."
+bytes = 16384
+sha256 = "768d60e741ccbefbc97b4027e04bb378605c2451420879cd35fc9ae1218a838d"
+
+[[file]]
+path = "humaipsy-white.svg"
+variant = "dark"
+format = "svg"
+size = "any"
+background = "transparent"
+purpose = "One-ink vector for dark grounds; white shapes, detail knocked out."
+bytes = 1880
+sha256 = "ba58b229da8c7a235a43e545b1d5894dc45ebb8549121c5222be597b599e6f2a"
+
+[[file]]
+path = "humaipsy-white-16.png"
+variant = "dark"
+format = "png"
+size = "16"
+background = "transparent"
+purpose = "One-ink raster for dark grounds; white shapes, detail knocked out."
+bytes = 334
+sha256 = "e81eadd2fdab51297b4ca7bd675a7c11d548682256c341484c7ed523ab7e89fe"
+
+[[file]]
+path = "humaipsy-white-24.png"
+variant = "dark"
+format = "png"
+size = "24"
+background = "transparent"
+purpose = "One-ink raster for dark grounds; white shapes, detail knocked out."
+bytes = 526
+sha256 = "08e92e0e84ca993a45632219c68a11592de510a2202215851f629422bda71ee0"
+
+[[file]]
+path = "humaipsy-white-32.png"
+variant = "dark"
+format = "png"
+size = "32"
+background = "transparent"
+purpose = "One-ink raster for dark grounds; white shapes, detail knocked out."
+bytes = 639
+sha256 = "80a9931132d5288ea083481eae26f68f8a4d35f833d5fb20b1e7f4e7b02b3b55"
+
+[[file]]
+path = "humaipsy-white-48.png"
+variant = "dark"
+format = "png"
+size = "48"
+background = "transparent"
+purpose = "One-ink raster for dark grounds; white shapes, detail knocked out."
+bytes = 990
+sha256 = "8dff4c2dace1b4d057cfa80c3d18949a5cd0e03ff2c02d9cdc087e296946ba1f"
+
+[[file]]
+path = "humaipsy-white-64.png"
+variant = "dark"
+format = "png"
+size = "64"
+background = "transparent"
+purpose = "One-ink raster for dark grounds; white shapes, detail knocked out."
+bytes = 1029
+sha256 = "02896252af86b411227baa7259ef427ff604c20ca22efdb0739cb3c4ae244027"
+
+[[file]]
+path = "humaipsy-white-128.png"
+variant = "dark"
+format = "png"
+size = "128"
+background = "transparent"
+purpose = "One-ink raster for dark grounds; white shapes, detail knocked out."
+bytes = 1971
+sha256 = "0c12193c014ae26edcc83d5488a52b1c2518e1e0eb04417c8b540d685a94c379"
+
+[[file]]
+path = "humaipsy-white-256.png"
+variant = "dark"
+format = "png"
+size = "256"
+background = "transparent"
+purpose = "One-ink raster for dark grounds; white shapes, detail knocked out."
+bytes = 5227
+sha256 = "bcb9e1e62c752845ec2a59a8f9484ef2fc6009ab87a16d3e5021eefd1f81ceb1"
+
+[[file]]
+path = "humaipsy-white-512.png"
+variant = "dark"
+format = "png"
+size = "512"
+background = "transparent"
+purpose = "One-ink raster for dark grounds; white shapes, detail knocked out."
+bytes = 11066
+sha256 = "95ecdfba6400a975a952204803d3e98bbcf57b8e345ef25e977fe4d5c10ad8db"
+
+[[file]]
+path = "humaipsy-white-1024.png"
+variant = "dark"
+format = "png"
+size = "1024"
+background = "transparent"
+purpose = "One-ink raster for dark grounds; white shapes, detail knocked out."
+bytes = 24075
+sha256 = "b0bcadd8aec772579fc075dad227e7bcbcacf072090a2bdd8ae6196a4e675321"
+
+[[file]]
+path = "humaipsy-white.rgba"
+variant = "dark"
+format = "rgba"
+size = "64x64"
+background = "transparent"
+purpose = "Unmultiplied RGBA of the bare white mark, for a tray icon (16,384 bytes)."
+bytes = 16384
+sha256 = "0b4567c7c8770e50f24387bfff1a71b7829c481171ff94f13a598046820622df"
+
