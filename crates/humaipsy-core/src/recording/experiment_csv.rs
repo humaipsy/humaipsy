@@ -757,7 +757,7 @@ mod tests {
             },
             TrialMetadata {
                 condition_index: 0,
-                condition_label: "Cooperative".to_string(),
+                condition_label: "Condition 1".to_string(),
                 trial_in_condition: 0,
                 block: 1,
             },

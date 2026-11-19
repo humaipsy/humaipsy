@@ -154,7 +154,7 @@ humaipsy/                  UI binary — depends on humaipsy-core and humaipsy-w
                               timer controls (Play starts a fresh run or resumes a pause, Pause
                               only stops the clock, X stops and resets, >> advances and resets
                               the new trial's clock), agent name/prompt fields and the
-                              Randomisation Condition order selector, CSV export shortcut,
+                              Counterbalancing order selector, CSV export shortcut,
                               chat room UI, participant-ID modal, the egui_tiles
                               OverviewPane/Behavior for the sidebar/chat split.
                               Orchestration state (OverviewChatUiState: current trial, chat
@@ -178,7 +178,7 @@ It implements a within-subject design: up to [`MAX_CONDITIONS`] = 2 named condit
 prompt (`HUMAIPSY_COOP_AGENT_PROMPT` / `HUMAIPSY_ARGUM_AGENT_PROMPT` env vars, defaults in
 `humaipsy/src/app_model.rs`), with a researcher-configurable number of trials per
 condition. Condition order is one of three modes, chosen on the Design tab's
-**Randomisation Condition** selector through
+**Counterbalancing** selector through
 `humaipsy_core::experiment::trial_descriptor_for_order`:
 
 - **Condition 1** (the default) and **Condition 2** are fixed alternating

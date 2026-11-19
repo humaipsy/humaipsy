@@ -303,8 +303,8 @@ pub fn condition_name(condition_index: usize) -> &'static str {
 /// Human-readable label for a condition name, used in CSV rows and the UI.
 pub fn condition_label(name: &str) -> &'static str {
     match name {
-        "ARGUM" => "Argum",
-        _ => "Cooperative",
+        "ARGUM" => "Condition 2",
+        _ => "Condition 1",
     }
 }
 
@@ -432,9 +432,9 @@ mod tests {
 
     #[test]
     fn condition_label_maps_known_and_unknown_names() {
-        assert_eq!(condition_label("ARGUM"), "Argum");
-        assert_eq!(condition_label("COOP"), "Cooperative");
-        assert_eq!(condition_label("unknown"), "Cooperative");
+        assert_eq!(condition_label("ARGUM"), "Condition 2");
+        assert_eq!(condition_label("COOP"), "Condition 1");
+        assert_eq!(condition_label("unknown"), "Condition 1");
     }
 
     #[test]
