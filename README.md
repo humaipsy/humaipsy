@@ -9,7 +9,7 @@
   <a href="https://humaipsy.github.io/humaipsy/"><img alt="Website" src="https://img.shields.io/badge/Website-humaipsy.github.io%2Fhumaipsy-blue"></a>
 </p>
 
-🤖 HumaiPsy 🤖 application for running Scientific Human-AI-agent Interaction experimentation for Experimental Psychology, Cognitive Sciences and HCI research. 
+🤖 HumaiPsy 🤖 App for Scientific Human-AI-Agent Interaction for Experimental Psychology, Cognitive Sciences and HCI research. 
 
 <p align="center">
   <table width="80%">
