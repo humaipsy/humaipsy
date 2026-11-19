@@ -222,7 +222,7 @@ impl ChatExample {
     /// The whole visible transcript as plain text: `HH:MM:SS Sender` on its own
     /// line, the message body under it, and a blank line between messages.
     ///
-    /// Includes system notices ("Moved to condition 1 (COOP), trial 2"), because
+    /// Includes system notices ("Moved to condition 1, trial 2"), because
     /// they are what a researcher needs when reading a run back.
     pub fn transcript_text(&self) -> String {
         let mut out = String::new();
@@ -488,7 +488,7 @@ mod tests {
         chat.hydrate(
             vec![
                 message("No, I like aesthetics", Some("LUIS3")),
-                message("Moved to condition 1 (COOP), trial 1.", Some("System")),
+                message("Moved to condition 1, trial 1.", Some("System")),
                 message("No sender here", None),
             ],
             vec![
@@ -502,7 +502,7 @@ mod tests {
             "00:35:37 LUIS3\n",
             "No, I like aesthetics\n\n",
             "00:35:43 System\n",
-            "Moved to condition 1 (COOP), trial 1.\n\n",
+            "Moved to condition 1, trial 1.\n\n",
             "00:35:44\n",
             "No sender here\n",
         );

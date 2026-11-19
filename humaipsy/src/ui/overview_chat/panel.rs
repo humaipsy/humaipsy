@@ -399,7 +399,6 @@ fn advance_to_next_trial(
     state.session.trial_memory_start_idx = state.chat.messages.len();
     state.session.trial_timeout_popup_open = false;
     let desc = current_trial_descriptor_from_state(&state.exp_design, &state.session);
-    let condition = humaipsy_core::experiment::condition_name(desc.condition_index);
     let session_meta = session_metadata_from_state(&state.session);
     update_web_status(app, state);
 
@@ -412,9 +411,8 @@ fn advance_to_next_trial(
         store,
         ChatMessage {
             content: format!(
-                "Moved to condition {} ({}), trial {}.",
+                "Moved to condition {}, trial {}.",
                 desc.condition_index + 1,
-                condition,
                 desc.trial_in_condition + 1
             ),
             from: Some("System".to_string()),
@@ -480,15 +478,13 @@ fn handle_trial_timeout(app: &HumaiPsy, store: &Store, state: &mut OverviewChatU
     state.session.trial_timeout_popup_open = true;
     let desc = current_trial_descriptor_from_state(&state.exp_design, &state.session);
 
-    let condition = humaipsy_core::experiment::condition_name(desc.condition_index);
     append_message_to_chat_and_store(
         &mut state.chat,
         store,
         ChatMessage {
             content: format!(
-                "Trial ended: condition {} ({}), trial {} reached {} seconds. Advancing to next trial.",
+                "Trial ended: condition {}, trial {} reached {} seconds. Advancing to next trial.",
                 desc.condition_index + 1,
-                condition,
                 desc.trial_in_condition + 1,
                 trial_seconds
             ),
@@ -1110,7 +1106,7 @@ fn start_experiment_from_play(app: &HumaiPsy, store: &Store, state: &mut Overvie
     );
 }
 
-/// Labels for the Design tab's Randomisation Condition dropdown, in the order the
+/// Labels for the Design tab's Counterbalancing dropdown, in the order the
 /// options are offered. The variants themselves — and what each one means for the
 /// trial sequence — live in `humaipsy_core::experiment::ConditionOrder`; only the
 /// wording is a presentation choice, so it stays here.
@@ -1152,8 +1148,8 @@ impl Default for HumaiPsyExpDesign {
             conditions: 2,
             trials: 2,
             trial_seconds: 120,
-            topic: "Ceramics and Pottery".to_string(),
-            question: "Are you happy?".to_string(),
+            topic: String::new(),
+            question: String::new(),
             condition_order: ConditionOrder::Condition1First,
         }
     }
@@ -2158,6 +2154,7 @@ fn render_right_bar(
                                         ui.horizontal(|ui| {
                                             ui.add(
                                                 egui::TextEdit::singleline(&mut state.exp_design.topic)
+                                                    .hint_text("Choose your topic")
                                                     .desired_width((middle_width - 24.0).max(120.0)),
                                             );
                                         });
@@ -2171,7 +2168,7 @@ fn render_right_bar(
                                         ui.horizontal(|ui| {
                                             ui.add(
                                                 egui::TextEdit::singleline(&mut state.exp_design.question)
-                                                    .hint_text("Type final question")
+                                                    .hint_text("Choose your question")
                                                     .desired_width((middle_width - 24.0).max(120.0)),
                                             );
                                         });
@@ -2230,7 +2227,7 @@ fn render_right_bar(
                                     ui.add_space(6.0);
 
                                     ui.horizontal(|ui| {
-                                        ui.label("Cooperative Name:");
+                                        ui.label("Condition 1 Name:");
                                         let name_width = ui.available_width();
                                         ui.add(
                                             egui::TextEdit::singleline(&mut app.coop_agent_name)
@@ -2249,7 +2246,7 @@ fn render_right_bar(
 
                                     ui.add_space(8.0);
                                     ui.horizontal(|ui| {
-                                        ui.label("Argumentative Name:");
+                                        ui.label("Condition 2 Name:");
                                         let name_width = ui.available_width();
                                         ui.add(
                                             egui::TextEdit::singleline(&mut app.argum_agent_name)
@@ -2268,7 +2265,7 @@ fn render_right_bar(
 
                                     ui.add_space(8.0);
                                     ui.horizontal(|ui| {
-                                        ui.label("Randomisation Condition:");
+                                        ui.label("Counterbalancing:");
                                         ui.add_enabled_ui(
                                             state.exp_design.conditions > 1
                                                 && !state.session.running,
@@ -2295,9 +2292,12 @@ fn render_right_bar(
                                     });
                                     ui.label(
                                         egui::RichText::new(
-                                            "Condition 1/2 fix which condition speaks first and \
-                                             alternate from there. Random draws a per-participant \
-                                             order with one trial of each condition per block.",
+                                            "Counterbalancing option helps with selecting either \
+                                             Condition 1 or Condition 2 as a first trial. The \
+                                             selection is aimed at balancing conditions during \
+                                             between-subjects design. Random option draws a \
+                                             per-participant order with one trial of each \
+                                             condition per block.",
                                         )
                                         .small()
                                         .weak(),
@@ -2444,8 +2444,10 @@ mod tests {
     }
 
     #[test]
-    fn default_design_topic_is_ceramics_and_pottery() {
-        assert_eq!(HumaiPsyExpDesign::default().topic, "Ceramics and Pottery");
+    fn default_design_starts_with_empty_topic_and_question() {
+        let design = HumaiPsyExpDesign::default();
+        assert!(design.topic.is_empty(), "topic should start empty so the user must choose one");
+        assert!(design.question.is_empty(), "question should start empty so the user must choose one");
     }
 
     fn temp_case_dir(label: &str) -> PathBuf {

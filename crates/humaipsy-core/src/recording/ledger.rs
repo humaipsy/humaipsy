@@ -17,7 +17,9 @@ use crate::sync_ext::MutexExt;
 
 pub const EVENTS_FILE: &str = "events.jsonl";
 pub const SUMMARY_FILE: &str = "summary.json";
-pub const BUNDLE_VERSION: &str = "1";
+/// Bumped to "2" when CSV/ledger `condition_label` values changed from
+/// "Cooperative"/"Argum" to "Condition 1"/"Condition 2".
+pub const BUNDLE_VERSION: &str = "2";
 
 /// Stable SHA-256 hex digest of UTF-8 text (empty string if `data` is empty).
 pub fn sha256_hex(data: &str) -> String {

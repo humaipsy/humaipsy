@@ -87,10 +87,10 @@ impl HumaiPsy {
         let metrics_config = MetricsConfig::from_env();
         let app_state = Arc::new(AppState::new(metrics_config.clone()));
         let coop_agent_prompt = humaipsy_core::env_compat::var("COOP_AGENT_PROMPT").unwrap_or_else(|_| {
-            "Experimental condition COOP: be cooperative with the human participant. Be supportive, collaborative, and help them progress constructively while staying safe and on-topic.".to_string()
+            "Condition 1: be cooperative with the human participant. Be supportive, collaborative, and help them progress constructively while staying safe and on-topic.".to_string()
         });
         let argum_agent_prompt = humaipsy_core::env_compat::var("ARGUM_AGENT_PROMPT").unwrap_or_else(|_| {
-            "Experimental condition ARGUM: be argumentative with the human participant. You must challenge assumptions, present counterpoints, and disagree when appropriate. Do NOT use a supportive or reassuring therapeutic style.".to_string()
+            "Condition 2: be argumentative with the human participant. You must challenge assumptions, present counterpoints, and disagree when appropriate. Do NOT use a supportive or reassuring therapeutic style.".to_string()
         });
 
         let web_status = humaipsy_web::new_shared_status();
